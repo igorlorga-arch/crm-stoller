@@ -7,14 +7,17 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="CRM RTV" />
 <title>CRM RTV</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
 <style>
   html, body { margin: 0; padding: 0; background: #E7E0C9; overscroll-behavior: none; }
   #root { min-height: 100vh; }
+  * { font-family: 'Inter', sans-serif; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
 </style>
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7.26.2/babel.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -32,7 +35,6 @@ window.addEventListener('error', function (e) {
 </script>
 
 <script>
-// ---------- local storage shim (mimics the Claude-artifact window.storage API) ----------
 window.storage = {
   get: function (key) {
     return new Promise(function (resolve) {
@@ -78,7 +80,6 @@ window.storage = {
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useMemo } = React;
 
-// ---------- emoji-based icon shim (replaces lucide-react, no bundler needed) ----------
 function EmojiIcon(glyph) {
   return function Icon({ size = 16, color, className = "", style = {} }) {
     return (
@@ -120,7 +121,6 @@ const Loader2 = EmojiIcon("⏳");
 const Calculator = EmojiIcon("🧮");
 const RefreshCw = EmojiIcon("🔄");
 
-// ---------- helpers ----------
 const uid = () => Math.random().toString(36).slice(2, 10);
 const fmtBRL = (n) =>
   (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -161,8 +161,6 @@ const WCODE = {
 };
 const wInfo = (code) => WCODE[code] || { d: "—", i: Cloud };
 
-// preset catalog for Stoller field reps — dose values are general references only;
-// always confirm the exact dose per crop/stage with Stoller technical support.
 const CROPS = ["Soja", "Milho", "Trigo", "Mandioca", "Citrus"];
 
 const STOLLER_PRESETS = [
@@ -223,7 +221,6 @@ const STOLLER_PRESETS = [
   },
 ];
 
-// ---------- storage ----------
 const KEYS = { producers: "rtv:producers", visits: "rtv:visits", products: "rtv:products", sales: "rtv:sales" };
 async function loadAll() {
   const out = {};
@@ -239,7 +236,6 @@ async function save(key, value) {
   try { await window.storage.set(KEYS[key], JSON.stringify(value), false); } catch {}
 }
 
-// ---------- shared UI ----------
 function Field({ label, children }) {
   return (
     <label className="block mb-3">
@@ -286,7 +282,6 @@ function EmptyState({ icon: Icon, title, sub }) {
   );
 }
 
-// ---------- app ----------
 function App() {
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState("inicio");
@@ -329,11 +324,6 @@ function App() {
 
   return (
     <div className="w-full min-h-screen flex items-center justify-center" style={{ background: "#E7E0C9" }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
-        * { font-family: 'Inter', sans-serif; }
-        .mono { font-family: 'JetBrains Mono', monospace; }
-      `}</style>
       <div className="w-full sm:max-w-[430px] sm:my-6 sm:rounded-[2.2rem] sm:shadow-2xl overflow-hidden relative" style={{ background: "#FBF7EC", height: "100vh", maxHeight: "100vh" }}>
         {!ready ? (
           <div className="h-full flex items-center justify-center"><Loader2 className="animate-spin" color="#1F3B2C" /></div>
@@ -364,7 +354,6 @@ function App() {
   );
 }
 
-// ---------- Header ----------
 function Header({ title, sub, right }) {
   return (
     <div className="px-5 pt-6 pb-4 flex items-start justify-between" style={{ background: "#1F3B2C" }}>
@@ -377,7 +366,6 @@ function Header({ title, sub, right }) {
   );
 }
 
-// ---------- INÍCIO / DASHBOARD ----------
 function Inicio({ producers, visits, products, sales, goTab }) {
   const [weather, setWeather] = useState(null);
   const [wLoading, setWLoading] = useState(false);
@@ -409,7 +397,7 @@ function Inicio({ producers, visits, products, sales, goTab }) {
     } catch { setWeather(null); }
     setWLoading(false);
   }
-  useEffect(() => { if (city) buscarClima(city); }, []); // eslint-disable-line
+  useEffect(() => { if (city) buscarClima(city); }, []);
 
   return (
     <div>
@@ -528,7 +516,6 @@ function MiniGauge({ label, count, tone }) {
   );
 }
 
-// ---------- PRODUTORES ----------
 function Produtores({ producers, setProducers, visits, sales, products }) {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState(null);
@@ -686,7 +673,6 @@ function ProducerForm({ initial, onSave, onClose }) {
   );
 }
 
-// ---------- AGENDA ----------
 function Agenda({ producers, visits, setVisits, products }) {
   const [editing, setEditing] = useState(null);
 
@@ -798,7 +784,6 @@ function VisitForm({ initial, producers, products, onSave, onClose }) {
   );
 }
 
-// ---------- PRODUTOS ----------
 function Produtos({ products, setProducts }) {
   const [editing, setEditing] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -1178,7 +1163,6 @@ function ProductForm({ initial, onSave, onClose }) {
   );
 }
 
-// ---------- VENDAS ----------
 function Vendas({ sales, setSales, producers, products }) {
   const [editing, setEditing] = useState(null);
   function upsert(data) {
@@ -1237,7 +1221,7 @@ function SaleForm({ initial, producers, products, onSave, onClose }) {
   useEffect(() => {
     const prod = products.find(p => p.id === f.productId);
     if (prod && !initial.id) setF(prev => ({ ...prev, valorTotal: (Number(prod.precoVenda) * Number(f.quantidade || 0)).toFixed(2) }));
-  }, [f.productId, f.quantidade]); // eslint-disable-line
+  }, [f.productId, f.quantidade]);
   const up = (k) => (e) => setF({ ...f, [k]: e.target.value });
   return (
     <Sheet title={initial.id ? "Editar venda" : "Nova venda"} onClose={onClose}>
@@ -1263,7 +1247,6 @@ function SaleForm({ initial, producers, products, onSave, onClose }) {
   );
 }
 
-// ---------- CALCULADORA DE MARGEM ----------
 function MarginCalculator({ products, initialProductId, onClose }) {
   const [productId, setProductId] = useState(initialProductId || "");
   const [custo, setCusto] = useState("");
@@ -1275,7 +1258,7 @@ function MarginCalculator({ products, initialProductId, onClose }) {
       const p = products.find(x => x.id === initialProductId);
       if (p) { setCusto(p.custo || ""); setPreco(p.precoVenda || ""); }
     }
-  }, []); // eslint-disable-line
+  }, []);
 
   function applyProduct(id) {
     setProductId(id);
@@ -1356,4 +1339,3 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>
 </html>
-
