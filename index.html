@@ -1,0 +1,1351 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="CRM RTV" />
+<title>CRM RTV</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #E7E0C9; overscroll-behavior: none; }
+  #root { min-height: 100vh; }
+</style>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+// ---------- local storage shim (mimics the Claude-artifact window.storage API) ----------
+window.storage = {
+  get: function (key) {
+    return new Promise(function (resolve) {
+      try {
+        var raw = localStorage.getItem("crmrtv:" + key);
+        if (raw === null) { resolve(null); return; }
+        resolve({ key: key, value: raw, shared: false });
+      } catch (e) { resolve(null); }
+    });
+  },
+  set: function (key, value) {
+    return new Promise(function (resolve) {
+      try {
+        localStorage.setItem("crmrtv:" + key, value);
+        resolve({ key: key, value: value, shared: false });
+      } catch (e) { resolve(null); }
+    });
+  },
+  delete: function (key) {
+    return new Promise(function (resolve) {
+      try {
+        localStorage.removeItem("crmrtv:" + key);
+        resolve({ key: key, deleted: true, shared: false });
+      } catch (e) { resolve(null); }
+    });
+  },
+  list: function (prefix) {
+    return new Promise(function (resolve) {
+      try {
+        var keys = [];
+        var p = "crmrtv:" + (prefix || "");
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i);
+          if (k && k.indexOf(p) === 0) keys.push(k.slice(7));
+        }
+        resolve({ keys: keys, prefix: prefix, shared: false });
+      } catch (e) { resolve(null); }
+    });
+  }
+};
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
+
+// ---------- emoji-based icon shim (replaces lucide-react, no bundler needed) ----------
+function EmojiIcon(glyph) {
+  return function Icon({ size = 16, color, className = "", style = {} }) {
+    return (
+      <span className={className} style={{ fontSize: size, lineHeight: 1, display: "inline-block", color, ...style }}>
+        {glyph}
+      </span>
+    );
+  };
+}
+const Users = EmojiIcon("👥");
+const Calendar = EmojiIcon("📅");
+const Package = EmojiIcon("📦");
+const DollarSign = EmojiIcon("💲");
+const Cloud = EmojiIcon("☁️");
+const Plus = EmojiIcon("➕");
+const X = EmojiIcon("✕");
+const MapPin = EmojiIcon("📍");
+const Mail = EmojiIcon("✉️");
+const Phone = EmojiIcon("📞");
+const TrendingUp = EmojiIcon("📈");
+const TrendingDown = EmojiIcon("📉");
+const AlertTriangle = EmojiIcon("⚠️");
+const CheckCircle2 = EmojiIcon("✅");
+const Search = EmojiIcon("🔍");
+const ChevronRight = EmojiIcon("›");
+const Sun = EmojiIcon("☀️");
+const CloudRain = EmojiIcon("🌧️");
+const CloudSnow = EmojiIcon("🌨️");
+const CloudDrizzle = EmojiIcon("🌦️");
+const Wind = EmojiIcon("💨");
+const Droplets = EmojiIcon("💧");
+const ArrowLeft = EmojiIcon("←");
+const Pencil = EmojiIcon("✏️");
+const Trash2 = EmojiIcon("🗑️");
+const Sprout = EmojiIcon("🌱");
+const Leaf = EmojiIcon("🍃");
+const FileText = EmojiIcon("📄");
+const Loader2 = EmojiIcon("⏳");
+const Calculator = EmojiIcon("🧮");
+const RefreshCw = EmojiIcon("🔄");
+
+// ---------- helpers ----------
+const uid = () => Math.random().toString(36).slice(2, 10);
+const fmtBRL = (n) =>
+  (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const fmtDate = (d) => {
+  if (!d) return "—";
+  const dt = new Date(d + "T00:00:00");
+  return dt.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+};
+
+function margemInfo(custo, preco) {
+  const c = Number(custo), p = Number(preco);
+  if (!p) return { pct: null, label: "—", tone: "neutral" };
+  const pct = ((p - c) / p) * 100;
+  let tone = "critica";
+  if (pct >= 25) tone = "saudavel";
+  else if (pct >= 10) tone = "atencao";
+  return { pct, tone };
+}
+
+const TONE = {
+  saudavel: { text: "Saudável", color: "#4C7A3D", bg: "#E7F0DF", icon: CheckCircle2 },
+  atencao: { text: "Atenção", color: "#A8721E", bg: "#F6EBD4", icon: AlertTriangle },
+  critica: { text: "Negativa", color: "#A5382A", bg: "#F5DFDA", icon: TrendingDown },
+  neutral: { text: "—", color: "#8A8065", bg: "#EFEAD9", icon: TrendingUp },
+};
+
+const WCODE = {
+  0: { d: "Céu limpo", i: Sun }, 1: { d: "Poucas nuvens", i: Sun },
+  2: { d: "Parcialmente nublado", i: Cloud }, 3: { d: "Nublado", i: Cloud },
+  45: { d: "Neblina", i: Cloud }, 48: { d: "Neblina", i: Cloud },
+  51: { d: "Garoa leve", i: CloudDrizzle }, 53: { d: "Garoa", i: CloudDrizzle },
+  55: { d: "Garoa forte", i: CloudDrizzle },
+  61: { d: "Chuva leve", i: CloudRain }, 63: { d: "Chuva", i: CloudRain },
+  65: { d: "Chuva forte", i: CloudRain },
+  80: { d: "Pancadas leves", i: CloudRain }, 81: { d: "Pancadas", i: CloudRain },
+  82: { d: "Pancadas fortes", i: CloudRain },
+  95: { d: "Tempestade", i: CloudRain }, 71: { d: "Neve", i: CloudSnow },
+};
+const wInfo = (code) => WCODE[code] || { d: "—", i: Cloud };
+
+// preset catalog for Stoller field reps — dose values are general references only;
+// always confirm the exact dose per crop/stage with Stoller technical support.
+const CROPS = ["Soja", "Milho", "Trigo", "Mandioca", "Citrus"];
+
+const STOLLER_PRESETS = [
+  {
+    nome: "Stimulate 10X", categoria: "Fisiológico",
+    beneficios: "Maior enraizamento, equilíbrio hormonal, mais retenção de flores/frutos e ganho de produtividade.",
+    caracteristicas: "Regulador de crescimento com citocinina, ácido giberélico e ácido indolbutírico; formulação 10x mais concentrada.",
+    condicoesAplicacao: "Pulverização foliar. Evitar sob estresse hídrico severo ou chuva iminente.",
+    custo: "", precoVenda: "",
+    culturas: [
+      { cultura: "Soja", estagio: "Desenvolvimento vegetativo (V4–V6) e florescimento (R1–R2)", dose: "Confirmar dose com o especialista Stoller (Programa Soja Forte)", posicionamento: "Aplicações no desenvolvimento vegetativo e no florescimento, para equilíbrio hormonal e maior retenção de vagens." },
+      { cultura: "Milho", estagio: "V4 e antes do pendoamento (VT)", dose: "Confirmar dose com o especialista Stoller (Programa Milho 360º)", posicionamento: "Reforça enraizamento inicial e tolerância a estresses ao longo do ciclo." },
+      { cultura: "Trigo", estagio: "Perfilhamento", dose: "Confirmar dose com o especialista Stoller", posicionamento: "Aplicação foliar para maior enraizamento e eficiência fotossintética." },
+      { cultura: "Citrus", estagio: "Brotação / pré-florada", dose: "Confirmar dose com o especialista Stoller", posicionamento: "Uso em pulverizações foliares para equilíbrio hormonal e retenção de estruturas reprodutivas." },
+    ],
+  },
+  {
+    nome: "Blue N", categoria: "Biológico",
+    beneficios: "Fornecimento contínuo de N, ganhos de peso de mil grãos e produtividade.",
+    caracteristicas: "Inoculante sólido à base de Methylobacterium symbioticum (cepa SB23), fixadora de N atmosférico via folha.",
+    condicoesAplicacao: "Verificar compatibilidade antes de misturar com outros defensivos; evitar horários de calor extremo.",
+    custo: "", precoVenda: "",
+    culturas: [
+      { cultura: "Soja", estagio: "V3–V4", dose: "Conforme bula — confirme com o representante Stoller", posicionamento: "Fixação biológica de nitrogênio via foliar ao longo do ciclo, reduzindo a adubação nitrogenada." },
+      { cultura: "Milho", estagio: "V3–V4", dose: "Conforme bula — confirme com o representante Stoller", posicionamento: "Fornecimento contínuo de N via foliar, reduz dependência de N mineral." },
+    ],
+  },
+  {
+    nome: "Hold", categoria: "Fisiológico",
+    beneficios: "Reduz o abortamento de flores/frutos e melhora a retenção reprodutiva.",
+    caracteristicas: "Solução fisiológica que atua na redução de etileno e dos efeitos do estresse.",
+    condicoesAplicacao: "Aplicação foliar; pode ser associado a retardadores de crescimento.",
+    custo: "", precoVenda: "",
+    culturas: [
+      { cultura: "Soja", estagio: "Início do florescimento (R1)", dose: "Referência de campo ~0,5 L/ha próximo ao início do florescimento — confirme com a Stoller", posicionamento: "Aplicado no início da floração para reduzir abortamento de flores/vagens." },
+    ],
+  },
+  {
+    nome: "Mover", categoria: "Fisiológico",
+    beneficios: "Maior peso e qualidade de grãos, mais rentabilidade.",
+    caracteristicas: "Solução fisiológica focada na translocação de fotoassimilados (açúcares) das folhas para os grãos.",
+    condicoesAplicacao: "Aplicação foliar na fase de enchimento; evitar horários de calor mais intenso.",
+    custo: "", precoVenda: "",
+    culturas: [
+      { cultura: "Soja", estagio: "Enchimento de grãos (R3–R5)", dose: "Dose técnica conforme estádio — confirme com o especialista Stoller", posicionamento: "Aplicado na fase de enchimento de grãos para aumentar o transporte de açúcares até os grãos." },
+    ],
+  },
+  {
+    nome: "Cellerate", categoria: "Nutrição foliar",
+    beneficios: "Melhora a eficiência do uso de N e fornece Zn para síntese de aminoácidos e fotossíntese.",
+    caracteristicas: "Fertilizante líquido de alta absorção com molibdênio e zinco, recomendado principalmente para gramíneas.",
+    condicoesAplicacao: "Compatível com a maioria dos adubos líquidos — confirme a mistura com o distribuidor.",
+    custo: "", precoVenda: "",
+    culturas: [
+      { cultura: "Milho", estagio: "Perfilhamento", dose: "Referência de campo ~0,2 L/ha no perfilhamento — confirme com a Stoller", posicionamento: "Aplicado no perfilhamento/desenvolvimento inicial para melhorar o aproveitamento de N." },
+      { cultura: "Trigo", estagio: "Perfilhamento", dose: "Referência de campo ~0,2 L/ha no perfilhamento — confirme com a Stoller", posicionamento: "Aplicado no perfilhamento para melhorar o aproveitamento de N via Mo." },
+    ],
+  },
+];
+
+// ---------- storage ----------
+const KEYS = { producers: "rtv:producers", visits: "rtv:visits", products: "rtv:products", sales: "rtv:sales" };
+async function loadAll() {
+  const out = {};
+  for (const [k, key] of Object.entries(KEYS)) {
+    try {
+      const r = await window.storage.get(key, false);
+      out[k] = r ? JSON.parse(r.value) : [];
+    } catch { out[k] = []; }
+  }
+  return out;
+}
+async function save(key, value) {
+  try { await window.storage.set(KEYS[key], JSON.stringify(value), false); } catch {}
+}
+
+// ---------- shared UI ----------
+function Field({ label, children }) {
+  return (
+    <label className="block mb-3">
+      <span className="block text-[11px] font-semibold tracking-wide uppercase mb-1" style={{ color: "#8A7C5C" }}>
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+const inputCls =
+  "w-full rounded-lg border px-3 py-2 text-[15px] bg-white outline-none focus:ring-2 transition";
+const inputStyle = { borderColor: "#D9CFB2", color: "#2B2418" };
+
+function Sheet({ title, onClose, children }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div
+        className="relative w-full sm:max-w-md max-h-[88vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-5 pb-8"
+        style={{ background: "#FBF7EC" }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold" style={{ fontFamily: "Fraunces, serif", color: "#1F3B2C" }}>{title}</h3>
+          <button onClick={onClose} className="p-1.5 rounded-full" style={{ background: "#EFE7D2" }}>
+            <X size={18} color="#5B5233" />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ icon: Icon, title, sub }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-14 text-center px-6">
+      <div className="w-14 h-14 rounded-full flex items-center justify-center mb-3" style={{ background: "#EFE7D2" }}>
+        <Icon size={24} color="#8A7C5C" />
+      </div>
+      <p className="font-semibold" style={{ color: "#3D3624" }}>{title}</p>
+      <p className="text-sm mt-1" style={{ color: "#8A7C5C" }}>{sub}</p>
+    </div>
+  );
+}
+
+// ---------- app ----------
+function App() {
+  const [ready, setReady] = useState(false);
+  const [tab, setTab] = useState("inicio");
+  const [producers, setProducers] = useState([]);
+  const [visits, setVisits] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [sales, setSales] = useState([]);
+
+  useEffect(() => {
+    loadAll().then((d) => {
+      const migratedProducts = d.products.map((p) => {
+        const withCulturas = p.culturas ? p : {
+          ...p,
+          culturas: p.cultura ? [{ id: uid(), cultura: p.cultura, dose: p.dose || "", posicionamento: p.posicionamento || "" }] : [],
+        };
+        return {
+          ...withCulturas,
+          culturas: withCulturas.culturas.map(c => ({ estagio: "", ...c })),
+          anotacoes: withCulturas.anotacoes || [],
+        };
+      });
+      setProducers(d.producers); setVisits(d.visits); setProducts(migratedProducts); setSales(d.sales);
+      setReady(true);
+    });
+  }, []);
+  useEffect(() => { if (ready) save("producers", producers); }, [producers, ready]);
+  useEffect(() => { if (ready) save("visits", visits); }, [visits, ready]);
+  useEffect(() => { if (ready) save("products", products); }, [products, ready]);
+  useEffect(() => { if (ready) save("sales", sales); }, [sales, ready]);
+
+  const ctx = { producers, setProducers, visits, setVisits, products, setProducts, sales, setSales };
+
+  const NAV = [
+    { id: "inicio", label: "Início", icon: Sprout },
+    { id: "produtores", label: "Produtores", icon: Users },
+    { id: "agenda", label: "Agenda", icon: Calendar },
+    { id: "produtos", label: "Produtos", icon: Package },
+    { id: "vendas", label: "Vendas", icon: DollarSign },
+  ];
+
+  return (
+    <div className="w-full min-h-screen flex items-center justify-center" style={{ background: "#E7E0C9" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
+        * { font-family: 'Inter', sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+      `}</style>
+      <div className="w-full sm:max-w-[430px] sm:my-6 sm:rounded-[2.2rem] sm:shadow-2xl overflow-hidden relative" style={{ background: "#FBF7EC", height: "100vh", maxHeight: "100vh" }}>
+        {!ready ? (
+          <div className="h-full flex items-center justify-center"><Loader2 className="animate-spin" color="#1F3B2C" /></div>
+        ) : (
+          <div className="h-full flex flex-col">
+            <div className="flex-1 overflow-y-auto pb-4">
+              {tab === "inicio" && <Inicio {...ctx} goTab={setTab} />}
+              {tab === "produtores" && <Produtores {...ctx} />}
+              {tab === "agenda" && <Agenda {...ctx} />}
+              {tab === "produtos" && <Produtos {...ctx} />}
+              {tab === "vendas" && <Vendas {...ctx} />}
+            </div>
+            <nav className="flex border-t" style={{ borderColor: "#E4DAC0", background: "#FBF7EC" }}>
+              {NAV.map((n) => {
+                const Icon = n.icon; const active = tab === n.id;
+                return (
+                  <button key={n.id} onClick={() => setTab(n.id)} className="flex-1 flex flex-col items-center gap-0.5 py-2.5">
+                    <Icon size={20} color={active ? "#1F3B2C" : "#A79B79"} strokeWidth={active ? 2.4 : 2} />
+                    <span className="text-[10px] font-semibold" style={{ color: active ? "#1F3B2C" : "#A79B79" }}>{n.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Header ----------
+function Header({ title, sub, right }) {
+  return (
+    <div className="px-5 pt-6 pb-4 flex items-start justify-between" style={{ background: "#1F3B2C" }}>
+      <div>
+        <p className="text-[11px] uppercase tracking-widest font-semibold" style={{ color: "#9FBB8E" }}>{sub}</p>
+        <h1 className="text-2xl font-bold text-white" style={{ fontFamily: "Fraunces, serif" }}>{title}</h1>
+      </div>
+      {right}
+    </div>
+  );
+}
+
+// ---------- INÍCIO / DASHBOARD ----------
+function Inicio({ producers, visits, products, sales, goTab }) {
+  const [weather, setWeather] = useState(null);
+  const [wLoading, setWLoading] = useState(false);
+  const [city, setCity] = useState(producers[0]?.cidade || "");
+
+  const today = new Date().toISOString().slice(0, 10);
+  const proximasVisitas = visits
+    .filter((v) => v.data >= today && v.status !== "Realizada")
+    .sort((a, b) => a.data.localeCompare(b.data))
+    .slice(0, 3);
+
+  const margens = products.map((p) => margemInfo(p.custo, p.precoVenda));
+  const critCount = margens.filter((m) => m.tone === "critica").length;
+  const okCount = margens.filter((m) => m.tone === "saudavel").length;
+
+  const totalVendasMes = sales
+    .filter((s) => s.data?.slice(0, 7) === today.slice(0, 7))
+    .reduce((acc, s) => acc + Number(s.valorTotal || 0), 0);
+
+  async function buscarClima(nomeCidade) {
+    if (!nomeCidade) return;
+    setWLoading(true);
+    try {
+      const geo = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(nomeCidade)}&count=1&language=pt&format=json`).then(r => r.json());
+      const loc = geo?.results?.[0];
+      if (!loc) { setWeather(null); setWLoading(false); return; }
+      const f = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=5`).then(r => r.json());
+      setWeather({ place: `${loc.name}${loc.admin1 ? ", " + loc.admin1 : ""}`, daily: f.daily });
+    } catch { setWeather(null); }
+    setWLoading(false);
+  }
+  useEffect(() => { if (city) buscarClima(city); }, []); // eslint-disable-line
+
+  return (
+    <div>
+      <Header sub="Painel geral" title="Bom trabalho de campo" />
+      <div className="px-5 -mt-2 space-y-4 mt-4">
+        {/* stat row */}
+        <div className="grid grid-cols-3 gap-2">
+          <StatCard label="Produtores" value={producers.length} icon={Users} />
+          <StatCard label="Visitas/mês" value={visits.filter(v => v.data?.slice(0,7)===today.slice(0,7)).length} icon={Calendar} />
+          <StatCard label="Vendas/mês" value={fmtBRL(totalVendasMes)} small icon={DollarSign} />
+        </div>
+
+        {/* weather card - signature element */}
+        <div className="rounded-2xl p-4 relative overflow-hidden" style={{ background: "#274A34" }}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] uppercase tracking-widest font-semibold" style={{ color: "#9FBB8E" }}>Previsão do tempo</span>
+            <Cloud size={16} color="#9FBB8E" />
+          </div>
+          <div className="flex gap-1.5 mb-2">
+            <input value={city} onChange={e => setCity(e.target.value)} placeholder="Cidade do produtor"
+              className="flex-1 rounded-lg px-2.5 py-1.5 text-sm outline-none" style={{ background: "#3A5D45", color: "#EAF2E4" }} />
+            <button onClick={() => buscarClima(city)} className="px-3 rounded-lg" style={{ background: "#4C7A3D" }}>
+              <Search size={15} color="white" />
+            </button>
+          </div>
+          {wLoading && <p className="text-sm text-white/70">Buscando...</p>}
+          {!wLoading && weather && (
+            <>
+              <p className="text-xs mb-2" style={{ color: "#C9DBBF" }}>{weather.place}</p>
+              <div className="flex gap-2 overflow-x-auto no-scrollbar">
+                {weather.daily.time.map((t, i) => {
+                  const info = wInfo(weather.daily.weathercode[i]);
+                  const Icon = info.i;
+                  return (
+                    <div key={t} className="flex flex-col items-center px-2.5 py-2 rounded-xl shrink-0" style={{ background: "#31563E", minWidth: 58 }}>
+                      <span className="text-[10px] font-semibold" style={{ color: "#C9DBBF" }}>
+                        {new Date(t + "T00:00:00").toLocaleDateString("pt-BR", { weekday: "short" })}
+                      </span>
+                      <Icon size={18} color="#EAF2E4" className="my-1" />
+                      <span className="text-[11px] font-bold text-white mono">{Math.round(weather.daily.temperature_2m_max[i])}°</span>
+                      <span className="text-[10px] mono" style={{ color: "#9FBB8E" }}>{Math.round(weather.daily.temperature_2m_min[i])}°</span>
+                      <span className="flex items-center gap-0.5 text-[9px] mt-1" style={{ color: "#9FBB8E" }}>
+                        <Droplets size={9} />{weather.daily.precipitation_probability_max[i]}%
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          {!wLoading && !weather && <p className="text-sm" style={{ color: "#C9DBBF" }}>Digite uma cidade para ver a previsão.</p>}
+        </div>
+
+        {/* margin health */}
+        <div className="rounded-2xl p-4 border" style={{ borderColor: "#E4DAC0" }}>
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[11px] uppercase tracking-widest font-semibold" style={{ color: "#8A7C5C" }}>Saúde das margens</span>
+            <button onClick={() => goTab("produtos")} className="text-xs font-semibold" style={{ color: "#1F3B2C" }}>Ver produtos</button>
+          </div>
+          {products.length === 0 ? (
+            <p className="text-sm" style={{ color: "#8A7C5C" }}>Cadastre produtos para ver a análise de margem.</p>
+          ) : (
+            <div className="flex gap-2">
+              <MiniGauge label="Saudáveis" count={okCount} tone="saudavel" />
+              <MiniGauge label="Atenção" count={margens.filter(m=>m.tone==="atencao").length} tone="atencao" />
+              <MiniGauge label="Negativas" count={critCount} tone="critica" />
+            </div>
+          )}
+        </div>
+
+        {/* próximas visitas */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] uppercase tracking-widest font-semibold" style={{ color: "#8A7C5C" }}>Próximas visitas</span>
+            <button onClick={() => goTab("agenda")} className="text-xs font-semibold" style={{ color: "#1F3B2C" }}>Ver agenda</button>
+          </div>
+          {proximasVisitas.length === 0 ? (
+            <p className="text-sm" style={{ color: "#8A7C5C" }}>Nenhuma visita agendada.</p>
+          ) : (
+            <div className="space-y-2">
+              {proximasVisitas.map(v => {
+                const prod = producers.find(p => p.id === v.producerId);
+                return (
+                  <div key={v.id} className="flex items-center gap-3 p-3 rounded-xl border" style={{ borderColor: "#E4DAC0" }}>
+                    <div className="w-11 h-11 rounded-lg flex flex-col items-center justify-center shrink-0" style={{ background: "#1F3B2C" }}>
+                      <span className="text-[9px] text-white/70 uppercase leading-none">{new Date(v.data+"T00:00:00").toLocaleDateString("pt-BR",{month:"short"})}</span>
+                      <span className="text-sm font-bold text-white leading-none mt-0.5">{v.data?.slice(8,10)}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm truncate" style={{ color: "#2B2418" }}>{prod?.nome || "Produtor removido"}</p>
+                      <p className="text-xs truncate" style={{ color: "#8A7C5C" }}>{v.observacoes || "Sem observações"}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value, icon: Icon, small }) {
+  return (
+    <div className="rounded-xl p-3 border" style={{ borderColor: "#E4DAC0" }}>
+      <Icon size={15} color="#8A7C5C" />
+      <p className={`mono font-bold mt-1.5 ${small ? "text-[13px]" : "text-lg"}`} style={{ color: "#1F3B2C" }}>{value}</p>
+      <p className="text-[10px] mt-0.5" style={{ color: "#8A7C5C" }}>{label}</p>
+    </div>
+  );
+}
+function MiniGauge({ label, count, tone }) {
+  const t = TONE[tone];
+  return (
+    <div className="flex-1 rounded-xl p-2.5 text-center" style={{ background: t.bg }}>
+      <p className="text-lg font-bold mono" style={{ color: t.color }}>{count}</p>
+      <p className="text-[10px] font-semibold" style={{ color: t.color }}>{label}</p>
+    </div>
+  );
+}
+
+// ---------- PRODUTORES ----------
+function Produtores({ producers, setProducers, visits, sales, products }) {
+  const [query, setQuery] = useState("");
+  const [editing, setEditing] = useState(null); // object or null
+  const [selected, setSelected] = useState(null); // detail view
+
+  const filtered = producers.filter(p => p.nome.toLowerCase().includes(query.toLowerCase()));
+
+  function upsert(data) {
+    if (data.id) setProducers(producers.map(p => p.id === data.id ? data : p));
+    else setProducers([...producers, { ...data, id: uid() }]);
+    setEditing(null);
+  }
+  function remove(id) {
+    setProducers(producers.filter(p => p.id !== id));
+    setSelected(null);
+  }
+
+  if (selected) {
+    const p = producers.find(x => x.id === selected);
+    if (!p) { setSelected(null); return null; }
+    const hist = sales.filter(s => s.producerId === p.id).sort((a,b)=>b.data.localeCompare(a.data));
+    const visitHist = visits.filter(v => v.producerId === p.id).sort((a,b)=>b.data.localeCompare(a.data));
+    return (
+      <div>
+        <div className="px-5 pt-6 pb-4" style={{ background: "#1F3B2C" }}>
+          <button onClick={() => setSelected(null)} className="flex items-center gap-1 text-sm mb-3" style={{ color: "#9FBB8E" }}>
+            <ArrowLeft size={15} /> Produtores
+          </button>
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl font-bold text-white" style={{ fontFamily: "Fraunces, serif" }}>{p.nome}</h1>
+            <div className="flex gap-2">
+              <button onClick={() => setEditing(p)} className="p-2 rounded-full" style={{ background: "#31563E" }}><Pencil size={15} color="white" /></button>
+              <button onClick={() => remove(p.id)} className="p-2 rounded-full" style={{ background: "#31563E" }}><Trash2 size={15} color="#F0AFA3" /></button>
+            </div>
+          </div>
+          {p.cultura && <p className="text-sm mt-0.5" style={{ color: "#C9DBBF" }}>{p.cultura}</p>}
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <div className="rounded-xl border p-3.5 space-y-2" style={{ borderColor: "#E4DAC0" }}>
+            <InfoRow icon={MapPin} text={p.localizacao || "Localização não informada"} />
+            <InfoRow icon={FileText} text={p.cpf ? `CPF: ${p.cpf}` : "CPF não informado"} mono />
+            <InfoRow icon={Mail} text={p.email || "E-mail não informado"} />
+            <InfoRow icon={Phone} text={p.telefone || "Telefone não informado"} />
+          </div>
+          {p.notas && (
+            <div className="rounded-xl p-3.5" style={{ background: "#F3ECD8" }}>
+              <p className="text-[11px] uppercase font-semibold tracking-wide mb-1" style={{ color: "#8A7C5C" }}>Notas</p>
+              <p className="text-sm" style={{ color: "#3D3624" }}>{p.notas}</p>
+            </div>
+          )}
+          <div>
+            <p className="text-[11px] uppercase font-semibold tracking-wide mb-2" style={{ color: "#8A7C5C" }}>Histórico de visitas ({visitHist.length})</p>
+            {visitHist.length === 0 ? <p className="text-sm" style={{ color: "#8A7C5C" }}>Nenhuma visita registrada.</p> :
+              <div className="space-y-2">
+                {visitHist.map(v => (
+                  <div key={v.id} className="rounded-lg border p-2.5" style={{ borderColor: "#E4DAC0" }}>
+                    <div className="flex justify-between text-xs font-semibold" style={{ color: "#1F3B2C" }}>
+                      <span>{fmtDate(v.data)}</span><span>{v.status}</span>
+                    </div>
+                    {v.observacoes && <p className="text-sm mt-1" style={{ color: "#3D3624" }}>{v.observacoes}</p>}
+                  </div>
+                ))}
+              </div>
+            }
+          </div>
+          <div>
+            <p className="text-[11px] uppercase font-semibold tracking-wide mb-2" style={{ color: "#8A7C5C" }}>Histórico de vendas ({hist.length})</p>
+            {hist.length === 0 ? <p className="text-sm" style={{ color: "#8A7C5C" }}>Nenhuma venda registrada.</p> :
+              <div className="space-y-2">
+                {hist.map(s => {
+                  const prod = products.find(pr => pr.id === s.productId);
+                  return (
+                    <div key={s.id} className="flex justify-between items-center rounded-lg border p-2.5" style={{ borderColor: "#E4DAC0" }}>
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: "#2B2418" }}>{prod?.nome || "Produto removido"}</p>
+                        <p className="text-xs" style={{ color: "#8A7C5C" }}>{fmtDate(s.data)} · {s.quantidade}x</p>
+                      </div>
+                      <span className="mono font-bold text-sm" style={{ color: "#1F3B2C" }}>{fmtBRL(s.valorTotal)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            }
+          </div>
+        </div>
+        {editing && <ProducerForm initial={editing} onSave={upsert} onClose={() => setEditing(null)} />}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <Header sub={`${producers.length} cadastrados`} title="Produtores" right={
+        <button onClick={() => setEditing({})} className="p-2 rounded-full" style={{ background: "#4C7A3D" }}><Plus size={18} color="white" /></button>
+      } />
+      <div className="px-5 pt-3">
+        <div className="relative mb-3">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" color="#A79B79" />
+          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar produtor..."
+            className={inputCls + " pl-9"} style={inputStyle} />
+        </div>
+        {filtered.length === 0 ? (
+          <EmptyState icon={Users} title="Nenhum produtor" sub="Toque em + para cadastrar o primeiro produtor visitado." />
+        ) : (
+          <div className="space-y-2 pb-2">
+            {filtered.map(p => (
+              <button key={p.id} onClick={() => setSelected(p.id)} className="w-full flex items-center gap-3 p-3 rounded-xl border text-left" style={{ borderColor: "#E4DAC0" }}>
+                <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white shrink-0" style={{ background: "#4C7A3D" }}>
+                  {p.nome?.[0]?.toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm truncate" style={{ color: "#2B2418" }}>{p.nome}</p>
+                  <p className="text-xs truncate flex items-center gap-1" style={{ color: "#8A7C5C" }}>
+                    <MapPin size={11} />{p.localizacao || "Sem localização"}
+                  </p>
+                </div>
+                <ChevronRight size={16} color="#C9BE9E" />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {editing && <ProducerForm initial={editing} onSave={upsert} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+function InfoRow({ icon: Icon, text, mono }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <Icon size={15} color="#8A7C5C" className="shrink-0" />
+      <span className={`text-sm ${mono ? "mono" : ""}`} style={{ color: "#3D3624" }}>{text}</span>
+    </div>
+  );
+}
+function ProducerForm({ initial, onSave, onClose }) {
+  const [f, setF] = useState({
+    nome: initial.nome || "", cpf: initial.cpf || "", email: initial.email || "",
+    telefone: initial.telefone || "", localizacao: initial.localizacao || "",
+    cultura: initial.cultura || "", notas: initial.notas || "", id: initial.id,
+  });
+  const up = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  return (
+    <Sheet title={initial.id ? "Editar produtor" : "Novo produtor"} onClose={onClose}>
+      <Field label="Nome"><input className={inputCls} style={inputStyle} value={f.nome} onChange={up("nome")} placeholder="Nome do produtor" /></Field>
+      <Field label="CPF"><input className={inputCls + " mono"} style={inputStyle} value={f.cpf} onChange={up("cpf")} placeholder="000.000.000-00" /></Field>
+      <Field label="E-mail"><input className={inputCls} style={inputStyle} value={f.email} onChange={up("email")} placeholder="email@exemplo.com" /></Field>
+      <Field label="Telefone"><input className={inputCls} style={inputStyle} value={f.telefone} onChange={up("telefone")} placeholder="(00) 00000-0000" /></Field>
+      <Field label="Localização"><input className={inputCls} style={inputStyle} value={f.localizacao} onChange={up("localizacao")} placeholder="Fazenda, cidade/UF" /></Field>
+      <Field label="Cultura principal"><input className={inputCls} style={inputStyle} value={f.cultura} onChange={up("cultura")} placeholder="Soja, milho, café..." /></Field>
+      <Field label="Notas"><textarea className={inputCls} style={inputStyle} rows={3} value={f.notas} onChange={up("notas")} placeholder="Observações gerais" /></Field>
+      <button onClick={() => f.nome && onSave(f)} className="w-full py-3 rounded-xl font-semibold text-white mt-2" style={{ background: "#1F3B2C" }}>
+        Salvar produtor
+      </button>
+    </Sheet>
+  );
+}
+
+// ---------- AGENDA ----------
+function Agenda({ producers, visits, setVisits, products }) {
+  const [editing, setEditing] = useState(null);
+
+  function upsert(data) {
+    if (data.id) setVisits(visits.map(v => v.id === data.id ? data : v));
+    else setVisits([...visits, { ...data, id: uid() }]);
+    setEditing(null);
+  }
+  function remove(id) { setVisits(visits.filter(v => v.id !== id)); }
+  function toggleStatus(v) { setVisits(visits.map(x => x.id === v.id ? { ...x, status: x.status === "Realizada" ? "Agendada" : "Realizada" } : x)); }
+
+  const sorted = [...visits].sort((a, b) => a.data.localeCompare(b.data));
+
+  return (
+    <div>
+      <Header sub={`${visits.length} registradas`} title="Agenda de visitas" right={
+        <button onClick={() => setEditing({})} disabled={producers.length===0} className="p-2 rounded-full disabled:opacity-40" style={{ background: "#4C7A3D" }}><Plus size={18} color="white" /></button>
+      } />
+      <div className="px-5 pt-4">
+        {producers.length === 0 ? (
+          <EmptyState icon={Calendar} title="Cadastre um produtor primeiro" sub="É preciso ao menos um produtor para agendar visitas." />
+        ) : sorted.length === 0 ? (
+          <EmptyState icon={Calendar} title="Nenhuma visita" sub="Toque em + para agendar uma visita a um produtor." />
+        ) : (
+          <div className="space-y-2 pb-2">
+            {sorted.map(v => {
+              const prod = producers.find(p => p.id === v.producerId);
+              const done = v.status === "Realizada";
+              return (
+                <div key={v.id} className="rounded-xl border p-3" style={{ borderColor: "#E4DAC0", opacity: done ? 0.6 : 1 }}>
+                  <div className="flex items-start justify-between">
+                    <div className="flex gap-3">
+                      <button onClick={() => toggleStatus(v)} className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: done ? "#E7F0DF" : "#1F3B2C" }}>
+                        {done ? <CheckCircle2 size={16} color="#4C7A3D" /> : <span className="text-white text-[10px] font-bold mono">{v.data?.slice(8,10)}/{v.data?.slice(5,7)}</span>}
+                      </button>
+                      <div>
+                        <p className="font-semibold text-sm" style={{ color: "#2B2418" }}>{prod?.nome || "Produtor removido"}</p>
+                        <p className="text-xs" style={{ color: "#8A7C5C" }}>{fmtDate(v.data)}{v.horario ? ` · ${v.horario}` : ""}</p>
+                        {v.observacoes && <p className="text-sm mt-1" style={{ color: "#3D3624" }}>{v.observacoes}</p>}
+                        {v.produtos?.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {v.produtos.map(pid => {
+                              const pr = products.find(x => x.id === pid);
+                              return pr ? <span key={pid} className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "#F3ECD8", color: "#6B5A2E" }}>{pr.nome}</span> : null;
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      <button onClick={() => setEditing(v)} className="p-1.5"><Pencil size={14} color="#A79B79" /></button>
+                      <button onClick={() => remove(v.id)} className="p-1.5"><Trash2 size={14} color="#A79B79" /></button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {editing && <VisitForm initial={editing} producers={producers} products={products} onSave={upsert} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+function VisitForm({ initial, producers, products, onSave, onClose }) {
+  const [f, setF] = useState({
+    producerId: initial.producerId || producers[0]?.id || "", data: initial.data || new Date().toISOString().slice(0,10),
+    horario: initial.horario || "", observacoes: initial.observacoes || "", status: initial.status || "Agendada",
+    produtos: initial.produtos || [], id: initial.id,
+  });
+  const up = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  function toggleProd(id) {
+    setF({ ...f, produtos: f.produtos.includes(id) ? f.produtos.filter(x => x !== id) : [...f.produtos, id] });
+  }
+  return (
+    <Sheet title={initial.id ? "Editar visita" : "Nova visita"} onClose={onClose}>
+      <Field label="Produtor">
+        <select className={inputCls} style={inputStyle} value={f.producerId} onChange={up("producerId")}>
+          {producers.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+        </select>
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Data"><input type="date" className={inputCls} style={inputStyle} value={f.data} onChange={up("data")} /></Field>
+        <Field label="Horário"><input type="time" className={inputCls} style={inputStyle} value={f.horario} onChange={up("horario")} /></Field>
+      </div>
+      <Field label="Observações"><textarea className={inputCls} style={inputStyle} rows={3} value={f.observacoes} onChange={up("observacoes")} placeholder="O que foi conversado / visitado" /></Field>
+      {products.length > 0 && (
+        <Field label="Produtos apresentados">
+          <div className="flex flex-wrap gap-1.5">
+            {products.map(p => (
+              <button key={p.id} type="button" onClick={() => toggleProd(p.id)}
+                className="text-xs font-semibold px-2.5 py-1.5 rounded-full border"
+                style={f.produtos.includes(p.id) ? { background: "#1F3B2C", color: "white", borderColor: "#1F3B2C" } : { color: "#6B5A2E", borderColor: "#D9CFB2" }}>
+                {p.nome}
+              </button>
+            ))}
+          </div>
+        </Field>
+      )}
+      <Field label="Status">
+        <select className={inputCls} style={inputStyle} value={f.status} onChange={up("status")}>
+          <option>Agendada</option><option>Realizada</option><option>Cancelada</option>
+        </select>
+      </Field>
+      <button onClick={() => f.producerId && onSave(f)} className="w-full py-3 rounded-xl font-semibold text-white mt-2" style={{ background: "#1F3B2C" }}>
+        Salvar visita
+      </button>
+    </Sheet>
+  );
+}
+
+// ---------- PRODUTOS ----------
+function Produtos({ products, setProducts }) {
+  const [editing, setEditing] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [calcOpen, setCalcOpen] = useState(false);
+  const [view, setView] = useState("lista"); // lista | culturas | anotacoes
+  const [activeCrop, setActiveCrop] = useState(CROPS[0]);
+  const [cropEditing, setCropEditing] = useState(null); // { productId, entry }
+  const [noteProductId, setNoteProductId] = useState(null);
+  const [noteText, setNoteText] = useState("");
+
+  function upsert(data) {
+    if (data.id) setProducts(products.map(p => p.id === data.id ? { ...p, ...data, culturas: p.culturas || [], anotacoes: p.anotacoes || [] } : p));
+    else setProducts([...products, { ...data, id: uid(), culturas: [], anotacoes: [] }]);
+    setEditing(null);
+  }
+  function remove(id) { setProducts(products.filter(p => p.id !== id)); setSelected(null); }
+  function loadPresets() {
+    const existingNames = products.map(p => p.nome.toLowerCase());
+    const toAdd = STOLLER_PRESETS.filter(p => !existingNames.includes(p.nome.toLowerCase()))
+      .map(p => ({ ...p, id: uid(), culturas: p.culturas.map(c => ({ ...c, id: uid() })), anotacoes: [] }));
+    if (toAdd.length) setProducts([...products, ...toAdd]);
+  }
+  function saveCropDose(productId, entry) {
+    setProducts(products.map(p => {
+      if (p.id !== productId) return p;
+      const culturas = p.culturas || [];
+      const exists = culturas.some(c => c.id === entry.id);
+      return { ...p, culturas: exists ? culturas.map(c => c.id === entry.id ? entry : c) : [...culturas, { ...entry, id: entry.id || uid() }] };
+    }));
+    setCropEditing(null);
+  }
+  function removeCropDose(productId, entryId) {
+    setProducts(products.map(p => p.id === productId ? { ...p, culturas: (p.culturas || []).filter(c => c.id !== entryId) } : p));
+  }
+  function addNote(productId, texto) {
+    if (!texto.trim()) return;
+    setProducts(products.map(p => p.id === productId
+      ? { ...p, anotacoes: [{ id: uid(), data: new Date().toISOString().slice(0, 10), texto: texto.trim() }, ...(p.anotacoes || [])] }
+      : p));
+    setNoteText("");
+  }
+  function removeNote(productId, noteId) {
+    setProducts(products.map(p => p.id === productId ? { ...p, anotacoes: (p.anotacoes || []).filter(n => n.id !== noteId) } : p));
+  }
+
+  if (selected) {
+    const p = products.find(x => x.id === selected);
+    if (!p) { setSelected(null); return null; }
+    const m = margemInfo(p.custo, p.precoVenda);
+    const t = TONE[m.tone]; const TIcon = t.icon;
+    const culturas = p.culturas || [];
+    return (
+      <div>
+        <div className="px-5 pt-6 pb-4" style={{ background: "#1F3B2C" }}>
+          <button onClick={() => setSelected(null)} className="flex items-center gap-1 text-sm mb-3" style={{ color: "#9FBB8E" }}><ArrowLeft size={15} /> Produtos</button>
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl font-bold text-white" style={{ fontFamily: "Fraunces, serif" }}>{p.nome}</h1>
+            <div className="flex gap-2">
+              <button onClick={() => setCalcOpen(true)} className="p-2 rounded-full" style={{ background: "#31563E" }} title="Calculadora de margem"><Calculator size={15} color="white" /></button>
+              <button onClick={() => setEditing(p)} className="p-2 rounded-full" style={{ background: "#31563E" }}><Pencil size={15} color="white" /></button>
+              <button onClick={() => remove(p.id)} className="p-2 rounded-full" style={{ background: "#31563E" }}><Trash2 size={15} color="#F0AFA3" /></button>
+            </div>
+          </div>
+          <p className="text-sm mt-0.5" style={{ color: "#C9DBBF" }}>{p.categoria}{culturas.length ? ` · ${culturas.map(c => c.cultura).join(", ")}` : ""}</p>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <div className="rounded-2xl p-4" style={{ background: t.bg }}>
+            <div className="flex items-center gap-2 mb-2">
+              <TIcon size={18} color={t.color} />
+              <span className="font-bold" style={{ color: t.color }}>Margem {t.text}</span>
+            </div>
+            <p className="text-3xl font-bold mono" style={{ color: t.color }}>{m.pct !== null ? `${m.pct.toFixed(1)}%` : "—"}</p>
+            <div className="flex justify-between text-sm mt-3 pt-3 border-t" style={{ borderColor: `${t.color}33` }}>
+              <span style={{ color: t.color }}>Custo: <b className="mono">{fmtBRL(p.custo)}</b></span>
+              <span style={{ color: t.color }}>Venda: <b className="mono">{fmtBRL(p.precoVenda)}</b></span>
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A7C5C" }}>Doses por cultura</span>
+              <button onClick={() => setCropEditing({ productId: p.id, entry: { cultura: CROPS[0], estagio: "", dose: "", posicionamento: "" } })} className="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full" style={{ background: "#EFE7D2", color: "#1F3B2C" }}>
+                <Plus size={12} /> Adicionar
+              </button>
+            </div>
+            {culturas.length === 0 ? (
+              <p className="text-sm" style={{ color: "#8A7C5C" }}>Nenhuma cultura cadastrada ainda para este produto.</p>
+            ) : (
+              <div className="space-y-2">
+                {culturas.map(c => (
+                  <div key={c.id} className="rounded-xl p-3.5" style={{ background: "#F3ECD8" }}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs font-bold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0" style={{ background: "#1F3B2C", color: "white" }}>{c.cultura}</span>
+                        {c.estagio && <span className="text-xs font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ background: "#E4DAC0", color: "#6B5A2E" }}>{c.estagio}</span>}
+                      </div>
+                      <div className="flex gap-1 shrink-0">
+                        <button onClick={() => setCropEditing({ productId: p.id, entry: c })} className="p-1"><Pencil size={13} color="#8A7C5C" /></button>
+                        <button onClick={() => removeCropDose(p.id, c.id)} className="p-1"><Trash2 size={13} color="#8A7C5C" /></button>
+                      </div>
+                    </div>
+                    {c.dose && <p className="text-sm font-semibold mono mt-2" style={{ color: "#3D3624" }}>{c.dose}</p>}
+                    {c.posicionamento && <p className="text-sm mt-1" style={{ color: "#6B5A2E" }}>{c.posicionamento}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {p.beneficios && <InfoBlock label="Benefícios" text={p.beneficios} />}
+          {p.caracteristicas && <InfoBlock label="Características" text={p.caracteristicas} />}
+          {p.condicoesAplicacao && <InfoBlock label="Condições de aplicação" text={p.condicoesAplicacao} />}
+        </div>
+        {editing && <ProductForm initial={editing} onSave={upsert} onClose={() => setEditing(null)} />}
+        {calcOpen && <MarginCalculator products={products} initialProductId={p.id} onClose={() => setCalcOpen(false)} />}
+        {cropEditing && <CropDoseForm initial={cropEditing.entry} onSave={(entry) => saveCropDose(cropEditing.productId, entry)} onClose={() => setCropEditing(null)} />}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <Header sub={`${products.length} cadastrados`} title="Produtos" right={
+        <div className="flex gap-2">
+          <button onClick={() => setCalcOpen(true)} className="p-2 rounded-full" style={{ background: "#31563E" }} title="Calculadora de margem">
+            <Calculator size={18} color="white" />
+          </button>
+          <button onClick={() => setEditing({})} className="p-2 rounded-full" style={{ background: "#4C7A3D" }}><Plus size={18} color="white" /></button>
+        </div>
+      } />
+      <div className="px-5 pt-3">
+        <div className="flex rounded-xl p-1 mb-3" style={{ background: "#EFE7D2" }}>
+          <button onClick={() => setView("lista")} className="flex-1 py-1.5 rounded-lg text-sm font-semibold" style={view === "lista" ? { background: "#1F3B2C", color: "white" } : { color: "#6B5A2E" }}>
+            Produtos
+          </button>
+          <button onClick={() => setView("culturas")} className="flex-1 py-1.5 rounded-lg text-sm font-semibold" style={view === "culturas" ? { background: "#1F3B2C", color: "white" } : { color: "#6B5A2E" }}>
+            Doses por cultura
+          </button>
+          <button onClick={() => setView("anotacoes")} className="flex-1 py-1.5 rounded-lg text-sm font-semibold" style={view === "anotacoes" ? { background: "#1F3B2C", color: "white" } : { color: "#6B5A2E" }}>
+            Anotações
+          </button>
+        </div>
+
+        <button onClick={() => setCalcOpen(true)} className="w-full flex items-center gap-3 p-3 rounded-xl mb-3" style={{ background: "#274A34" }}>
+          <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: "#3A5D45" }}>
+            <Calculator size={17} color="#EAF2E4" />
+          </div>
+          <div className="flex-1 text-left">
+            <p className="text-sm font-semibold text-white">Calculadora de margem</p>
+            <p className="text-xs" style={{ color: "#9FBB8E" }}>Simule custo, preço e margem sem salvar</p>
+          </div>
+          <ChevronRight size={16} color="#9FBB8E" />
+        </button>
+        {products.length < STOLLER_PRESETS.length && (
+          <button onClick={loadPresets} className="w-full flex items-center gap-3 p-3 rounded-xl mb-3 border" style={{ borderColor: "#D9CFB2", background: "#F3ECD8" }}>
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: "#E4DAC0" }}>
+              <Sprout size={17} color="#4C7A3D" />
+            </div>
+            <div className="flex-1 text-left">
+              <p className="text-sm font-semibold" style={{ color: "#3D3624" }}>Carregar catálogo Stoller</p>
+              <p className="text-xs" style={{ color: "#8A7C5C" }}>Stimulate 10X, Blue N, Hold, Mover e Cellerate</p>
+            </div>
+            <ChevronRight size={16} color="#A79B79" />
+          </button>
+        )}
+
+        {view === "lista" && (
+          products.length === 0 ? (
+            <EmptyState icon={Package} title="Nenhum produto" sub="Cadastre produtos para calcular margem, dose e benefícios." />
+          ) : (
+            <div className="space-y-2 pb-2">
+              {products.map(p => {
+                const m = margemInfo(p.custo, p.precoVenda);
+                const t = TONE[m.tone];
+                const culturas = p.culturas || [];
+                return (
+                  <button key={p.id} onClick={() => setSelected(p.id)} className="w-full flex items-center gap-3 p-3 rounded-xl border text-left" style={{ borderColor: "#E4DAC0" }}>
+                    <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: "#F3ECD8" }}>
+                      <Leaf size={17} color="#6B5A2E" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm truncate" style={{ color: "#2B2418" }}>{p.nome}</p>
+                      <p className="text-xs truncate" style={{ color: "#8A7C5C" }}>{p.categoria}{culturas.length ? ` · ${culturas.map(c => c.cultura).join(", ")}` : ""}</p>
+                    </div>
+                    <span className="text-xs font-bold px-2 py-1 rounded-full mono shrink-0" style={{ background: t.bg, color: t.color }}>
+                      {m.pct !== null ? `${m.pct.toFixed(0)}%` : "—"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )
+        )}
+
+        {view === "culturas" && (
+          <div className="pb-2">
+            <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-3">
+              {CROPS.map(crop => (
+                <button key={crop} onClick={() => setActiveCrop(crop)} className="px-3 py-1.5 rounded-full text-xs font-semibold shrink-0 border"
+                  style={activeCrop === crop ? { background: "#1F3B2C", color: "white", borderColor: "#1F3B2C" } : { color: "#6B5A2E", borderColor: "#D9CFB2" }}>
+                  {crop}
+                </button>
+              ))}
+            </div>
+            {products.length === 0 ? (
+              <EmptyState icon={Sprout} title="Nenhum produto cadastrado" sub="Cadastre produtos para organizar doses por cultura." />
+            ) : (
+              <div className="space-y-2">
+                {products.map(p => {
+                  const entry = (p.culturas || []).find(c => c.cultura === activeCrop);
+                  return (
+                    <div key={p.id} className="rounded-xl border p-3" style={{ borderColor: "#E4DAC0" }}>
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="font-semibold text-sm" style={{ color: "#2B2418" }}>{p.nome}</p>
+                        <button
+                          onClick={() => setCropEditing({ productId: p.id, entry: entry || { cultura: activeCrop, estagio: "", dose: "", posicionamento: "" } })}
+                          className="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full shrink-0"
+                          style={{ background: "#EFE7D2", color: "#1F3B2C" }}>
+                          {entry ? <Pencil size={11} /> : <Plus size={11} />} {entry ? "Editar" : "Adicionar"}
+                        </button>
+                      </div>
+                      {entry ? (
+                        <>
+                          {entry.estagio && <span className="inline-block text-xs font-semibold px-2 py-0.5 rounded-full mb-1.5" style={{ background: "#F3ECD8", color: "#6B5A2E" }}>{entry.estagio}</span>}
+                          {entry.dose && <p className="text-sm font-semibold mono" style={{ color: "#3D3624" }}>{entry.dose}</p>}
+                          {entry.posicionamento && <p className="text-sm mt-1" style={{ color: "#8A7C5C" }}>{entry.posicionamento}</p>}
+                        </>
+                      ) : (
+                        <p className="text-sm" style={{ color: "#A79B79" }}>Sem dose cadastrada para {activeCrop.toLowerCase()}.</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {view === "anotacoes" && (
+          products.length === 0 ? (
+            <EmptyState icon={FileText} title="Nenhum produto cadastrado" sub="Cadastre produtos para registrar anotações de campo." />
+          ) : (
+            <div className="pb-2">
+              <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-3">
+                {products.map(p => (
+                  <button key={p.id} onClick={() => { setNoteProductId(p.id); setNoteText(""); }} className="px-3 py-1.5 rounded-full text-xs font-semibold shrink-0 border"
+                    style={noteProductId === p.id ? { background: "#1F3B2C", color: "white", borderColor: "#1F3B2C" } : { color: "#6B5A2E", borderColor: "#D9CFB2" }}>
+                    {p.nome}
+                  </button>
+                ))}
+              </div>
+              {!noteProductId ? (
+                <p className="text-sm px-0.5" style={{ color: "#8A7C5C" }}>Escolha um produto acima para ver ou adicionar anotações.</p>
+              ) : (() => {
+                const p = products.find(x => x.id === noteProductId);
+                if (!p) return null;
+                const notas = p.anotacoes || [];
+                return (
+                  <div>
+                    <div className="flex gap-2 mb-3">
+                      <textarea value={noteText} onChange={e => setNoteText(e.target.value)} rows={2} placeholder={`Anotação sobre ${p.nome}...`}
+                        className={inputCls} style={inputStyle} />
+                      <button onClick={() => addNote(p.id, noteText)} className="px-3 rounded-lg shrink-0" style={{ background: "#1F3B2C" }}>
+                        <Plus size={16} color="white" />
+                      </button>
+                    </div>
+                    {notas.length === 0 ? (
+                      <p className="text-sm" style={{ color: "#8A7C5C" }}>Nenhuma anotação ainda para {p.nome}.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {notas.map(n => (
+                          <div key={n.id} className="rounded-xl border p-3 flex items-start justify-between gap-2" style={{ borderColor: "#E4DAC0" }}>
+                            <div className="min-w-0">
+                              <p className="text-[11px] font-semibold mono mb-0.5" style={{ color: "#8A7C5C" }}>{fmtDate(n.data)}</p>
+                              <p className="text-sm whitespace-pre-line" style={{ color: "#3D3624" }}>{n.texto}</p>
+                            </div>
+                            <button onClick={() => removeNote(p.id, n.id)} className="p-1 shrink-0"><Trash2 size={13} color="#A79B79" /></button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          )
+        )}
+      </div>
+      {editing && <ProductForm initial={editing} onSave={upsert} onClose={() => setEditing(null)} />}
+      {calcOpen && <MarginCalculator products={products} onClose={() => setCalcOpen(false)} />}
+      {cropEditing && <CropDoseForm initial={cropEditing.entry} onSave={(entry) => saveCropDose(cropEditing.productId, entry)} onClose={() => setCropEditing(null)} />}
+    </div>
+  );
+}
+function CropDoseForm({ initial, onSave, onClose }) {
+  const [f, setF] = useState({
+    id: initial.id, cultura: initial.cultura || CROPS[0], outra: CROPS.includes(initial.cultura) ? "" : (initial.cultura || ""),
+    estagio: initial.estagio || "", dose: initial.dose || "", posicionamento: initial.posicionamento || "",
+  });
+  const isOutra = f.cultura === "Outra";
+  const up = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  function handleSave() {
+    const cultura = isOutra ? f.outra.trim() : f.cultura;
+    if (!cultura) return;
+    onSave({ id: f.id, cultura, estagio: f.estagio, dose: f.dose, posicionamento: f.posicionamento });
+  }
+  return (
+    <Sheet title={initial.id ? "Editar dose por cultura" : "Nova dose por cultura"} onClose={onClose}>
+      <Field label="Cultura">
+        <select className={inputCls} style={inputStyle} value={f.cultura} onChange={up("cultura")}>
+          {CROPS.map(c => <option key={c} value={c}>{c}</option>)}
+          <option value="Outra">Outra cultura...</option>
+        </select>
+      </Field>
+      {isOutra && (
+        <Field label="Nome da cultura"><input className={inputCls} style={inputStyle} value={f.outra} onChange={up("outra")} placeholder="Ex: Café" /></Field>
+      )}
+      <Field label="Estágio de aplicação"><input className={inputCls} style={inputStyle} value={f.estagio} onChange={up("estagio")} placeholder="Ex: V4, início do florescimento (R1), perfilhamento" /></Field>
+      <Field label="Dose"><input className={inputCls} style={inputStyle} value={f.dose} onChange={up("dose")} placeholder="Ex: 0,5 L/ha" /></Field>
+      <Field label="Posicionamento"><textarea className={inputCls} style={inputStyle} rows={3} value={f.posicionamento} onChange={up("posicionamento")} placeholder="Objetivo da aplicação nesse estágio" /></Field>
+      <button onClick={handleSave} className="w-full py-3 rounded-xl font-semibold text-white mt-2" style={{ background: "#1F3B2C" }}>
+        Salvar dose
+      </button>
+    </Sheet>
+  );
+}
+function InfoBlock({ label, text }) {
+  return (
+    <div className="rounded-xl p-3.5" style={{ background: "#F3ECD8" }}>
+      <p className="text-[11px] uppercase font-semibold tracking-wide mb-1" style={{ color: "#8A7C5C" }}>{label}</p>
+      <p className="text-sm whitespace-pre-line" style={{ color: "#3D3624" }}>{text}</p>
+    </div>
+  );
+}
+function ProductForm({ initial, onSave, onClose }) {
+  const [f, setF] = useState({
+    nome: initial.nome || "", categoria: initial.categoria || "Fisiológico",
+    custo: initial.custo || "", precoVenda: initial.precoVenda || "",
+    beneficios: initial.beneficios || "",
+    caracteristicas: initial.caracteristicas || "", condicoesAplicacao: initial.condicoesAplicacao || "",
+    culturas: initial.culturas || [],
+    id: initial.id,
+  });
+  const up = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const m = margemInfo(f.custo, f.precoVenda);
+  const t = TONE[m.tone];
+  return (
+    <Sheet title={initial.id ? "Editar produto" : "Novo produto"} onClose={onClose}>
+      <Field label="Nome"><input className={inputCls} style={inputStyle} value={f.nome} onChange={up("nome")} placeholder="Nome do produto" /></Field>
+      <Field label="Categoria">
+        <select className={inputCls} style={inputStyle} value={f.categoria} onChange={up("categoria")}>
+          <option>Fisiológico</option><option>Biológico</option><option>Nutrição foliar</option>
+          <option>Fungicida</option><option>Inseticida</option><option>Herbicida</option>
+          <option>Fertilizante</option><option>Bioestimulante</option><option>Outro</option>
+        </select>
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Custo (R$)"><input type="number" step="0.01" className={inputCls + " mono"} style={inputStyle} value={f.custo} onChange={up("custo")} placeholder="0,00" /></Field>
+        <Field label="Preço de venda (R$)"><input type="number" step="0.01" className={inputCls + " mono"} style={inputStyle} value={f.precoVenda} onChange={up("precoVenda")} placeholder="0,00" /></Field>
+      </div>
+      {f.custo && f.precoVenda ? (
+        <div className="rounded-lg px-3 py-2 mb-3 flex items-center justify-between" style={{ background: t.bg }}>
+          <span className="text-xs font-semibold" style={{ color: t.color }}>Margem {t.text}</span>
+          <span className="font-bold mono" style={{ color: t.color }}>{m.pct.toFixed(1)}%</span>
+        </div>
+      ) : null}
+      <p className="text-xs mb-3 px-0.5" style={{ color: "#8A7C5C" }}>
+        Dose e posicionamento por cultura são cadastrados na ficha do produto, depois de salvar.
+      </p>
+      <Field label="Benefícios"><textarea className={inputCls} style={inputStyle} rows={2} value={f.beneficios} onChange={up("beneficios")} placeholder="Principais benefícios do produto" /></Field>
+      <Field label="Características"><textarea className={inputCls} style={inputStyle} rows={2} value={f.caracteristicas} onChange={up("caracteristicas")} placeholder="Composição, modo de ação..." /></Field>
+      <Field label="Condições de aplicação"><textarea className={inputCls} style={inputStyle} rows={2} value={f.condicoesAplicacao} onChange={up("condicoesAplicacao")} placeholder="Clima, janela de aplicação, EPIs..." /></Field>
+      <button onClick={() => f.nome && onSave(f)} className="w-full py-3 rounded-xl font-semibold text-white mt-2" style={{ background: "#1F3B2C" }}>
+        Salvar produto
+      </button>
+    </Sheet>
+  );
+}
+
+// ---------- VENDAS ----------
+function Vendas({ sales, setSales, producers, products }) {
+  const [editing, setEditing] = useState(null);
+  function upsert(data) {
+    if (data.id) setSales(sales.map(s => s.id === data.id ? data : s));
+    else setSales([...sales, { ...data, id: uid() }]);
+    setEditing(null);
+  }
+  function remove(id) { setSales(sales.filter(s => s.id !== id)); }
+  const sorted = [...sales].sort((a, b) => b.data.localeCompare(a.data));
+  const total = sales.reduce((acc, s) => acc + Number(s.valorTotal || 0), 0);
+
+  return (
+    <div>
+      <Header sub={`Total ${fmtBRL(total)}`} title="Histórico de vendas" right={
+        <button onClick={() => setEditing({})} disabled={producers.length===0 || products.length===0} className="p-2 rounded-full disabled:opacity-40" style={{ background: "#4C7A3D" }}><Plus size={18} color="white" /></button>
+      } />
+      <div className="px-5 pt-4">
+        {producers.length === 0 || products.length === 0 ? (
+          <EmptyState icon={DollarSign} title="Cadastre produtores e produtos" sub="É preciso ao menos um de cada para registrar vendas." />
+        ) : sorted.length === 0 ? (
+          <EmptyState icon={DollarSign} title="Nenhuma venda" sub="Toque em + para registrar a primeira venda." />
+        ) : (
+          <div className="space-y-2 pb-2">
+            {sorted.map(s => {
+              const prod = producers.find(p => p.id === s.producerId);
+              const item = products.find(p => p.id === s.productId);
+              return (
+                <div key={s.id} className="flex items-center gap-3 p-3 rounded-xl border" style={{ borderColor: "#E4DAC0" }}>
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: "#F3ECD8" }}>
+                    <DollarSign size={17} color="#6B5A2E" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm truncate" style={{ color: "#2B2418" }}>{item?.nome || "Produto removido"}</p>
+                    <p className="text-xs truncate" style={{ color: "#8A7C5C" }}>{prod?.nome || "Produtor removido"} · {fmtDate(s.data)} · {s.quantidade}x</p>
+                  </div>
+                  <span className="mono font-bold text-sm shrink-0" style={{ color: "#1F3B2C" }}>{fmtBRL(s.valorTotal)}</span>
+                  <button onClick={() => remove(s.id)} className="p-1 shrink-0"><Trash2 size={14} color="#A79B79" /></button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {editing && <SaleForm initial={editing} producers={producers} products={products} onSave={upsert} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+function SaleForm({ initial, producers, products, onSave, onClose }) {
+  const [f, setF] = useState({
+    producerId: initial.producerId || producers[0]?.id || "",
+    productId: initial.productId || products[0]?.id || "",
+    quantidade: initial.quantidade || 1,
+    data: initial.data || new Date().toISOString().slice(0,10),
+    valorTotal: initial.valorTotal || "", id: initial.id,
+  });
+  useEffect(() => {
+    const prod = products.find(p => p.id === f.productId);
+    if (prod && !initial.id) setF(prev => ({ ...prev, valorTotal: (Number(prod.precoVenda) * Number(f.quantidade || 0)).toFixed(2) }));
+  }, [f.productId, f.quantidade]); // eslint-disable-line
+  const up = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  return (
+    <Sheet title={initial.id ? "Editar venda" : "Nova venda"} onClose={onClose}>
+      <Field label="Produtor">
+        <select className={inputCls} style={inputStyle} value={f.producerId} onChange={up("producerId")}>
+          {producers.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+        </select>
+      </Field>
+      <Field label="Produto">
+        <select className={inputCls} style={inputStyle} value={f.productId} onChange={up("productId")}>
+          {products.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+        </select>
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Quantidade"><input type="number" min="1" className={inputCls + " mono"} style={inputStyle} value={f.quantidade} onChange={up("quantidade")} /></Field>
+        <Field label="Data"><input type="date" className={inputCls} style={inputStyle} value={f.data} onChange={up("data")} /></Field>
+      </div>
+      <Field label="Valor total (R$)"><input type="number" step="0.01" className={inputCls + " mono"} style={inputStyle} value={f.valorTotal} onChange={up("valorTotal")} /></Field>
+      <button onClick={() => f.producerId && f.productId && onSave(f)} className="w-full py-3 rounded-xl font-semibold text-white mt-2" style={{ background: "#1F3B2C" }}>
+        Salvar venda
+      </button>
+    </Sheet>
+  );
+}
+
+// ---------- CALCULADORA DE MARGEM ----------
+function MarginCalculator({ products, initialProductId, onClose }) {
+  const [productId, setProductId] = useState(initialProductId || "");
+  const [custo, setCusto] = useState("");
+  const [preco, setPreco] = useState("");
+  const [margemAlvo, setMargemAlvo] = useState("");
+
+  useEffect(() => {
+    if (initialProductId) {
+      const p = products.find(x => x.id === initialProductId);
+      if (p) { setCusto(p.custo || ""); setPreco(p.precoVenda || ""); }
+    }
+  }, []); // eslint-disable-line
+
+  function applyProduct(id) {
+    setProductId(id);
+    const p = products.find(x => x.id === id);
+    if (p) { setCusto(p.custo || ""); setPreco(p.precoVenda || ""); }
+  }
+
+  const m = margemInfo(custo, preco);
+  const t = TONE[m.tone];
+  const TIcon = t.icon;
+  const lucroUnit = (Number(preco) || 0) - (Number(custo) || 0);
+  const markup = Number(custo) ? (lucroUnit / Number(custo)) * 100 : null;
+
+  // reverse: given cost + target margin, required sale price
+  const precoNecessario = (custo && margemAlvo && Number(margemAlvo) < 100)
+    ? Number(custo) / (1 - Number(margemAlvo) / 100)
+    : null;
+
+  function reset() { setCusto(""); setPreco(""); setMargemAlvo(""); setProductId(""); }
+
+  return (
+    <Sheet title="Calculadora de margem" onClose={onClose}>
+      {products.length > 0 && (
+        <Field label="Carregar valores de um produto (opcional)">
+          <select className={inputCls} style={inputStyle} value={productId} onChange={e => applyProduct(e.target.value)}>
+            <option value="">Digitar manualmente</option>
+            {products.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+          </select>
+        </Field>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Custo (R$)">
+          <input type="number" step="0.01" className={inputCls + " mono"} style={inputStyle} value={custo} onChange={e => setCusto(e.target.value)} placeholder="0,00" />
+        </Field>
+        <Field label="Preço de venda (R$)">
+          <input type="number" step="0.01" className={inputCls + " mono"} style={inputStyle} value={preco} onChange={e => setPreco(e.target.value)} placeholder="0,00" />
+        </Field>
+      </div>
+
+      <div className="rounded-2xl p-4 mb-4" style={{ background: t.bg }}>
+        <div className="flex items-center gap-2 mb-1">
+          <TIcon size={17} color={t.color} />
+          <span className="text-sm font-bold" style={{ color: t.color }}>Margem {t.text}</span>
+        </div>
+        <p className="text-3xl font-bold mono" style={{ color: t.color }}>{m.pct !== null ? `${m.pct.toFixed(1)}%` : "—"}</p>
+        <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t text-sm" style={{ borderColor: `${t.color}33` }}>
+          <span style={{ color: t.color }}>Lucro/un: <b className="mono">{fmtBRL(lucroUnit)}</b></span>
+          <span style={{ color: t.color }}>Markup: <b className="mono">{markup !== null ? `${markup.toFixed(1)}%` : "—"}</b></span>
+        </div>
+      </div>
+
+      <div className="rounded-xl border p-3.5 mb-2" style={{ borderColor: "#E4DAC0" }}>
+        <div className="flex items-center gap-2 mb-2">
+          <RefreshCw size={14} color="#8A7C5C" />
+          <span className="text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A7C5C" }}>Cálculo reverso</span>
+        </div>
+        <Field label="Margem desejada (%)">
+          <input type="number" step="0.1" className={inputCls + " mono"} style={inputStyle} value={margemAlvo} onChange={e => setMargemAlvo(e.target.value)} placeholder="Ex: 30" />
+        </Field>
+        {precoNecessario !== null ? (
+          <div className="rounded-lg px-3 py-2 flex items-center justify-between" style={{ background: "#F3ECD8" }}>
+            <span className="text-xs font-semibold" style={{ color: "#6B5A2E" }}>Preço de venda necessário</span>
+            <span className="font-bold mono" style={{ color: "#1F3B2C" }}>{fmtBRL(precoNecessario)}</span>
+          </div>
+        ) : (
+          <p className="text-xs" style={{ color: "#8A7C5C" }}>Informe custo e margem desejada (abaixo de 100%) para calcular o preço necessário.</p>
+        )}
+      </div>
+
+      <button onClick={reset} className="w-full py-2.5 rounded-xl font-semibold text-sm mt-1" style={{ background: "#EFE7D2", color: "#6B5A2E" }}>
+        Limpar campos
+      </button>
+    </Sheet>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
