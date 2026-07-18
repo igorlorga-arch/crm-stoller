@@ -161,6 +161,15 @@ const WCODE = {
 };
 const wInfo = (code) => WCODE[code] || { d: "—", i: Cloud };
 
+async function reverseGeocode(lat, lon) {
+  try {
+    const r = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=pt`).then(res => res.json());
+    return r.city || r.locality || r.principalSubdivision || "Sua localização";
+  } catch {
+    return "Sua localização";
+  }
+}
+
 const CROPS = ["Soja", "Milho", "Trigo", "Mandioca", "Citrus"];
 
 const STOLLER_PRESETS = [
@@ -369,7 +378,8 @@ function Header({ title, sub, right }) {
 function Inicio({ producers, visits, products, sales, goTab }) {
   const [weather, setWeather] = useState(null);
   const [wLoading, setWLoading] = useState(false);
-  const [city, setCity] = useState(producers[0]?.cidade || "");
+  const [city, setCity] = useState("");
+  const [autoTried, setAutoTried] = useState(false);
 
   const today = new Date().toISOString().slice(0, 10);
   const proximasVisitas = visits
@@ -385,6 +395,15 @@ function Inicio({ producers, visits, products, sales, goTab }) {
     .filter((s) => s.data?.slice(0, 7) === today.slice(0, 7))
     .reduce((acc, s) => acc + Number(s.valorTotal || 0), 0);
 
+  async function buscarClimaPorCoords(lat, lon, label) {
+    setWLoading(true);
+    try {
+      const f = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=5`).then(r => r.json());
+      setWeather({ place: label, daily: f.daily });
+    } catch { setWeather(null); }
+    setWLoading(false);
+  }
+
   async function buscarClima(nomeCidade) {
     if (!nomeCidade) return;
     setWLoading(true);
@@ -397,7 +416,21 @@ function Inicio({ producers, visits, products, sales, goTab }) {
     } catch { setWeather(null); }
     setWLoading(false);
   }
-  useEffect(() => { if (city) buscarClima(city); }, []);
+
+  useEffect(() => {
+    if (!navigator.geolocation) { setAutoTried(true); return; }
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        const label = await reverseGeocode(latitude, longitude);
+        setCity(label);
+        await buscarClimaPorCoords(latitude, longitude, label);
+        setAutoTried(true);
+      },
+      () => { setAutoTried(true); },
+      { timeout: 8000 }
+    );
+  }, []);
 
   return (
     <div>
@@ -446,7 +479,11 @@ function Inicio({ producers, visits, products, sales, goTab }) {
               </div>
             </>
           )}
-          {!wLoading && !weather && <p className="text-sm" style={{ color: "#C9DBBF" }}>Digite uma cidade para ver a previsão.</p>}
+          {!wLoading && !weather && (
+            <p className="text-sm" style={{ color: "#C9DBBF" }}>
+              {autoTried ? "Digite uma cidade para ver a previsão." : "Detectando sua localização..."}
+            </p>
+          )}
         </div>
 
         <div className="rounded-2xl p-4 border" style={{ borderColor: "#E4DAC0" }}>
@@ -559,6 +596,12 @@ function Produtores({ producers, setProducers, visits, sales, products }) {
             <InfoRow icon={FileText} text={p.cpf ? `CPF: ${p.cpf}` : "CPF não informado"} mono />
             <InfoRow icon={Mail} text={p.email || "E-mail não informado"} />
             <InfoRow icon={Phone} text={p.telefone || "Telefone não informado"} />
+            {p.lat && p.lng && (
+              <a href={`https://maps.apple.com/?ll=${p.lat},${p.lng}&q=${encodeURIComponent(p.nome)}`} target="_blank" rel="noreferrer"
+                className="flex items-center gap-2.5 text-sm font-semibold pt-1" style={{ color: "#1F3B2C" }}>
+                <MapPin size={15} color="#1F3B2C" className="shrink-0" /> Ver no mapa
+              </a>
+            )}
           </div>
           {p.notas && (
             <div className="rounded-xl p-3.5" style={{ background: "#F3ECD8" }}>
@@ -654,16 +697,42 @@ function ProducerForm({ initial, onSave, onClose }) {
   const [f, setF] = useState({
     nome: initial.nome || "", cpf: initial.cpf || "", email: initial.email || "",
     telefone: initial.telefone || "", localizacao: initial.localizacao || "",
+    lat: initial.lat || null, lng: initial.lng || null,
     cultura: initial.cultura || "", notas: initial.notas || "", id: initial.id,
   });
+  const [locating, setLocating] = useState(false);
   const up = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  function useMyLocation() {
+    if (!navigator.geolocation) return;
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        const label = await reverseGeocode(latitude, longitude);
+        setF(prev => ({ ...prev, lat: latitude, lng: longitude, localizacao: prev.localizacao || label }));
+        setLocating(false);
+      },
+      () => setLocating(false),
+      { timeout: 8000 }
+    );
+  }
+
   return (
     <Sheet title={initial.id ? "Editar produtor" : "Novo produtor"} onClose={onClose}>
       <Field label="Nome"><input className={inputCls} style={inputStyle} value={f.nome} onChange={up("nome")} placeholder="Nome do produtor" /></Field>
       <Field label="CPF"><input className={inputCls + " mono"} style={inputStyle} value={f.cpf} onChange={up("cpf")} placeholder="000.000.000-00" /></Field>
       <Field label="E-mail"><input className={inputCls} style={inputStyle} value={f.email} onChange={up("email")} placeholder="email@exemplo.com" /></Field>
       <Field label="Telefone"><input className={inputCls} style={inputStyle} value={f.telefone} onChange={up("telefone")} placeholder="(00) 00000-0000" /></Field>
-      <Field label="Localização"><input className={inputCls} style={inputStyle} value={f.localizacao} onChange={up("localizacao")} placeholder="Fazenda, cidade/UF" /></Field>
+      <Field label="Localização">
+        <div className="flex gap-2">
+          <input className={inputCls} style={inputStyle} value={f.localizacao} onChange={up("localizacao")} placeholder="Fazenda, cidade/UF" />
+          <button type="button" onClick={useMyLocation} className="px-3 rounded-lg shrink-0" style={{ background: "#1F3B2C" }} title="Usar minha localização atual">
+            {locating ? <Loader2 size={16} color="white" className="animate-spin" /> : <MapPin size={16} color="white" />}
+          </button>
+        </div>
+        {f.lat && f.lng && <p className="text-xs mt-1.5" style={{ color: "#4C7A3D" }}>📍 Coordenadas GPS salvas — vai aparecer um link "Ver no mapa" na ficha do produtor.</p>}
+      </Field>
       <Field label="Cultura principal"><input className={inputCls} style={inputStyle} value={f.cultura} onChange={up("cultura")} placeholder="Soja, milho, café..." /></Field>
       <Field label="Notas"><textarea className={inputCls} style={inputStyle} rows={3} value={f.notas} onChange={up("notas")} placeholder="Observações gerais" /></Field>
       <button onClick={() => f.nome && onSave(f)} className="w-full py-3 rounded-xl font-semibold text-white mt-2" style={{ background: "#1F3B2C" }}>
@@ -1252,6 +1321,7 @@ function MarginCalculator({ products, initialProductId, onClose }) {
   const [custo, setCusto] = useState("");
   const [preco, setPreco] = useState("");
   const [margemAlvo, setMargemAlvo] = useState("");
+  const [desconto, setDesconto] = useState("");
 
   useEffect(() => {
     if (initialProductId) {
@@ -1276,7 +1346,12 @@ function MarginCalculator({ products, initialProductId, onClose }) {
     ? Number(custo) / (1 - Number(margemAlvo) / 100)
     : null;
 
-  function reset() { setCusto(""); setPreco(""); setMargemAlvo(""); setProductId(""); }
+  const precoFinal = (preco && desconto)
+    ? Number(preco) * (1 - Number(desconto) / 100)
+    : null;
+  const margemFinal = precoFinal !== null ? margemInfo(custo, precoFinal) : null;
+
+  function reset() { setCusto(""); setPreco(""); setMargemAlvo(""); setDesconto(""); setProductId(""); }
 
   return (
     <Sheet title="Calculadora de margem" onClose={onClose}>
@@ -1325,6 +1400,30 @@ function MarginCalculator({ products, initialProductId, onClose }) {
           </div>
         ) : (
           <p className="text-xs" style={{ color: "#8A7C5C" }}>Informe custo e margem desejada (abaixo de 100%) para calcular o preço necessário.</p>
+        )}
+      </div>
+
+      <div className="rounded-xl border p-3.5 mb-2" style={{ borderColor: "#E4DAC0" }}>
+        <div className="flex items-center gap-2 mb-2">
+          <TrendingDown size={14} color="#8A7C5C" />
+          <span className="text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A7C5C" }}>Aplicar desconto</span>
+        </div>
+        <Field label="Desconto (%)">
+          <input type="number" step="0.1" className={inputCls + " mono"} style={inputStyle} value={desconto} onChange={e => setDesconto(e.target.value)} placeholder="Ex: 10" />
+        </Field>
+        {precoFinal !== null ? (
+          <div className="space-y-2">
+            <div className="rounded-lg px-3 py-2 flex items-center justify-between" style={{ background: "#F3ECD8" }}>
+              <span className="text-xs font-semibold" style={{ color: "#6B5A2E" }}>Preço final</span>
+              <span className="font-bold mono" style={{ color: "#1F3B2C" }}>{fmtBRL(precoFinal)}</span>
+            </div>
+            <div className="rounded-lg px-3 py-2 flex items-center justify-between" style={{ background: TONE[margemFinal.tone].bg }}>
+              <span className="text-xs font-semibold" style={{ color: TONE[margemFinal.tone].color }}>Margem após desconto ({TONE[margemFinal.tone].text})</span>
+              <span className="font-bold mono" style={{ color: TONE[margemFinal.tone].color }}>{margemFinal.pct !== null ? `${margemFinal.pct.toFixed(1)}%` : "—"}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs" style={{ color: "#8A7C5C" }}>Informe o preço de venda e o desconto para ver o preço final.</p>
         )}
       </div>
 
