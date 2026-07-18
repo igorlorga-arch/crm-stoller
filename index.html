@@ -20,6 +20,18 @@
 <div id="root"></div>
 
 <script>
+window.addEventListener('error', function (e) {
+  var el = document.getElementById('root');
+  if (!el) return;
+  var msg = (e.message || 'Erro desconhecido');
+  var loc = (e.filename || '') + ':' + (e.lineno || '') + ':' + (e.colno || '');
+  var stack = (e.error && e.error.stack) ? e.error.stack : '';
+  el.innerHTML = '<div style="padding:20px;font-family:monospace;font-size:13px;white-space:pre-wrap;color:#7a1f1f;background:#fbe4e0;min-height:100vh;">'
+    + '⚠️ ERRO AO CARREGAR O APP\n\n' + msg + '\n\n' + loc + '\n\n' + stack + '</div>';
+});
+</script>
+
+<script>
 // ---------- local storage shim (mimics the Claude-artifact window.storage API) ----------
 window.storage = {
   get: function (key) {
@@ -403,14 +415,12 @@ function Inicio({ producers, visits, products, sales, goTab }) {
     <div>
       <Header sub="Painel geral" title="Bom trabalho de campo" />
       <div className="px-5 -mt-2 space-y-4 mt-4">
-        {/* stat row */}
         <div className="grid grid-cols-3 gap-2">
           <StatCard label="Produtores" value={producers.length} icon={Users} />
           <StatCard label="Visitas/mês" value={visits.filter(v => v.data?.slice(0,7)===today.slice(0,7)).length} icon={Calendar} />
           <StatCard label="Vendas/mês" value={fmtBRL(totalVendasMes)} small icon={DollarSign} />
         </div>
 
-        {/* weather card - signature element */}
         <div className="rounded-2xl p-4 relative overflow-hidden" style={{ background: "#274A34" }}>
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] uppercase tracking-widest font-semibold" style={{ color: "#9FBB8E" }}>Previsão do tempo</span>
@@ -451,7 +461,6 @@ function Inicio({ producers, visits, products, sales, goTab }) {
           {!wLoading && !weather && <p className="text-sm" style={{ color: "#C9DBBF" }}>Digite uma cidade para ver a previsão.</p>}
         </div>
 
-        {/* margin health */}
         <div className="rounded-2xl p-4 border" style={{ borderColor: "#E4DAC0" }}>
           <div className="flex items-center justify-between mb-3">
             <span className="text-[11px] uppercase tracking-widest font-semibold" style={{ color: "#8A7C5C" }}>Saúde das margens</span>
@@ -468,7 +477,6 @@ function Inicio({ producers, visits, products, sales, goTab }) {
           )}
         </div>
 
-        {/* próximas visitas */}
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] uppercase tracking-widest font-semibold" style={{ color: "#8A7C5C" }}>Próximas visitas</span>
@@ -523,8 +531,8 @@ function MiniGauge({ label, count, tone }) {
 // ---------- PRODUTORES ----------
 function Produtores({ producers, setProducers, visits, sales, products }) {
   const [query, setQuery] = useState("");
-  const [editing, setEditing] = useState(null); // object or null
-  const [selected, setSelected] = useState(null); // detail view
+  const [editing, setEditing] = useState(null);
+  const [selected, setSelected] = useState(null);
 
   const filtered = producers.filter(p => p.nome.toLowerCase().includes(query.toLowerCase()));
 
@@ -795,9 +803,9 @@ function Produtos({ products, setProducts }) {
   const [editing, setEditing] = useState(null);
   const [selected, setSelected] = useState(null);
   const [calcOpen, setCalcOpen] = useState(false);
-  const [view, setView] = useState("lista"); // lista | culturas | anotacoes
+  const [view, setView] = useState("lista");
   const [activeCrop, setActiveCrop] = useState(CROPS[0]);
-  const [cropEditing, setCropEditing] = useState(null); // { productId, entry }
+  const [cropEditing, setCropEditing] = useState(null);
   const [noteProductId, setNoteProductId] = useState(null);
   const [noteText, setNoteText] = useState("");
 
@@ -1281,7 +1289,6 @@ function MarginCalculator({ products, initialProductId, onClose }) {
   const lucroUnit = (Number(preco) || 0) - (Number(custo) || 0);
   const markup = Number(custo) ? (lucroUnit / Number(custo)) * 100 : null;
 
-  // reverse: given cost + target margin, required sale price
   const precoNecessario = (custo && margemAlvo && Number(margemAlvo) < 100)
     ? Number(custo) / (1 - Number(margemAlvo) / 100)
     : null;
@@ -1349,3 +1356,4 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>
 </html>
+
