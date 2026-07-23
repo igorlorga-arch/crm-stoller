@@ -35,6 +35,7 @@ window.addEventListener('error', function (e) {
 </script>
 
 <script>
+// ---------- local storage shim (mimics the Claude-artifact window.storage API) ----------
 window.storage = {
   get: function (key) {
     return new Promise(function (resolve) {
@@ -80,6 +81,7 @@ window.storage = {
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useMemo } = React;
 
+// ---------- emoji-based icon shim (replaces lucide-react, no bundler needed) ----------
 function EmojiIcon(glyph) {
   return function Icon({ size = 16, color, className = "", style = {} }) {
     return (
@@ -121,6 +123,7 @@ const Loader2 = EmojiIcon("⏳");
 const Calculator = EmojiIcon("🧮");
 const RefreshCw = EmojiIcon("🔄");
 
+// ---------- helpers ----------
 const uid = () => Math.random().toString(36).slice(2, 10);
 const fmtBRL = (n) =>
   (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -170,6 +173,8 @@ async function reverseGeocode(lat, lon) {
   }
 }
 
+// preset catalog for Stoller field reps — dose values are general references only;
+// always confirm the exact dose per crop/stage with Stoller technical support.
 const CROPS = ["Soja", "Milho", "Trigo", "Mandioca", "Citrus"];
 
 const STOLLER_PRESETS = [
@@ -230,6 +235,7 @@ const STOLLER_PRESETS = [
   },
 ];
 
+// ---------- storage ----------
 const KEYS = { producers: "rtv:producers", visits: "rtv:visits", products: "rtv:products", sales: "rtv:sales" };
 async function loadAll() {
   const out = {};
@@ -245,6 +251,7 @@ async function save(key, value) {
   try { await window.storage.set(KEYS[key], JSON.stringify(value), false); } catch {}
 }
 
+// ---------- shared UI ----------
 function Field({ label, children }) {
   return (
     <label className="block mb-3">
@@ -291,6 +298,7 @@ function EmptyState({ icon: Icon, title, sub }) {
   );
 }
 
+// ---------- app ----------
 function App() {
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState("inicio");
@@ -363,6 +371,7 @@ function App() {
   );
 }
 
+// ---------- Header ----------
 function Header({ title, sub, right }) {
   return (
     <div className="px-5 pb-4 flex items-start justify-between" style={{ background: "#1F3B2C", paddingTop: "calc(env(safe-area-inset-top, 0px) + 1.5rem)" }}>
@@ -375,6 +384,7 @@ function Header({ title, sub, right }) {
   );
 }
 
+// ---------- INÍCIO / DASHBOARD ----------
 function Inicio({ producers, visits, products, sales, goTab }) {
   const [weather, setWeather] = useState(null);
   const [wLoading, setWLoading] = useState(false);
@@ -427,21 +437,23 @@ function Inicio({ producers, visits, products, sales, goTab }) {
         await buscarClimaPorCoords(latitude, longitude, label);
         setAutoTried(true);
       },
-      () => { setAutoTried(true); },
+      () => { setAutoTried(true); }, // permission denied or unavailable — manual search stays available
       { timeout: 8000 }
     );
-  }, []);
+  }, []); // eslint-disable-line
 
   return (
     <div>
       <Header sub="Painel geral" title="Bom trabalho de campo" />
       <div className="px-5 -mt-2 space-y-4 mt-4">
+        {/* stat row */}
         <div className="grid grid-cols-3 gap-2">
           <StatCard label="Produtores" value={producers.length} icon={Users} />
           <StatCard label="Visitas/mês" value={visits.filter(v => v.data?.slice(0,7)===today.slice(0,7)).length} icon={Calendar} />
           <StatCard label="Vendas/mês" value={fmtBRL(totalVendasMes)} small icon={DollarSign} />
         </div>
 
+        {/* weather card - signature element */}
         <div className="rounded-2xl p-4 relative overflow-hidden" style={{ background: "#274A34" }}>
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] uppercase tracking-widest font-semibold" style={{ color: "#9FBB8E" }}>Previsão do tempo</span>
@@ -486,6 +498,7 @@ function Inicio({ producers, visits, products, sales, goTab }) {
           )}
         </div>
 
+        {/* margin health */}
         <div className="rounded-2xl p-4 border" style={{ borderColor: "#E4DAC0" }}>
           <div className="flex items-center justify-between mb-3">
             <span className="text-[11px] uppercase tracking-widest font-semibold" style={{ color: "#8A7C5C" }}>Saúde das margens</span>
@@ -502,6 +515,7 @@ function Inicio({ producers, visits, products, sales, goTab }) {
           )}
         </div>
 
+        {/* próximas visitas */}
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] uppercase tracking-widest font-semibold" style={{ color: "#8A7C5C" }}>Próximas visitas</span>
@@ -553,10 +567,11 @@ function MiniGauge({ label, count, tone }) {
   );
 }
 
+// ---------- PRODUTORES ----------
 function Produtores({ producers, setProducers, visits, sales, products }) {
   const [query, setQuery] = useState("");
-  const [editing, setEditing] = useState(null);
-  const [selected, setSelected] = useState(null);
+  const [editing, setEditing] = useState(null); // object or null
+  const [selected, setSelected] = useState(null); // detail view
 
   const filtered = producers.filter(p => p.nome.toLowerCase().includes(query.toLowerCase()));
 
@@ -742,7 +757,8 @@ function ProducerForm({ initial, onSave, onClose }) {
   );
 }
 
-function Agenda({ producers, visits, setVisits, products }) {
+// ---------- AGENDA ----------
+function Agenda({ producers, visits, setVisits, products, setProducers }) {
   const [editing, setEditing] = useState(null);
 
   function upsert(data) {
@@ -752,23 +768,27 @@ function Agenda({ producers, visits, setVisits, products }) {
   }
   function remove(id) { setVisits(visits.filter(v => v.id !== id)); }
   function toggleStatus(v) { setVisits(visits.map(x => x.id === v.id ? { ...x, status: x.status === "Realizada" ? "Agendada" : "Realizada" } : x)); }
+  function promoteToProducer(v) {
+    const novo = { id: uid(), nome: v.nomeAvulso, cpf: "", email: "", telefone: "", localizacao: "", lat: null, lng: null, cultura: "", notas: "" };
+    setProducers(prev => [...prev, novo]);
+    setVisits(visits.map(x => x.id === v.id ? { ...x, producerId: novo.id, nomeAvulso: "" } : x));
+  }
 
   const sorted = [...visits].sort((a, b) => a.data.localeCompare(b.data));
 
   return (
     <div>
       <Header sub={`${visits.length} registradas`} title="Agenda de visitas" right={
-        <button onClick={() => setEditing({})} disabled={producers.length===0} className="p-2 rounded-full disabled:opacity-40" style={{ background: "#4C7A3D" }}><Plus size={18} color="white" /></button>
+        <button onClick={() => setEditing({})} className="p-2 rounded-full" style={{ background: "#4C7A3D" }}><Plus size={18} color="white" /></button>
       } />
       <div className="px-5 pt-4">
-        {producers.length === 0 ? (
-          <EmptyState icon={Calendar} title="Cadastre um produtor primeiro" sub="É preciso ao menos um produtor para agendar visitas." />
-        ) : sorted.length === 0 ? (
-          <EmptyState icon={Calendar} title="Nenhuma visita" sub="Toque em + para agendar uma visita a um produtor." />
+        {sorted.length === 0 ? (
+          <EmptyState icon={Calendar} title="Nenhuma visita" sub="Toque em + para registrar uma visita — com ou sem produtor cadastrado." />
         ) : (
           <div className="space-y-2 pb-2">
             {sorted.map(v => {
               const prod = producers.find(p => p.id === v.producerId);
+              const nomeExibido = prod?.nome || v.nomeAvulso || "Sem nome";
               const done = v.status === "Realizada";
               return (
                 <div key={v.id} className="rounded-xl border p-3" style={{ borderColor: "#E4DAC0", opacity: done ? 0.6 : 1 }}>
@@ -778,7 +798,12 @@ function Agenda({ producers, visits, setVisits, products }) {
                         {done ? <CheckCircle2 size={16} color="#4C7A3D" /> : <span className="text-white text-[10px] font-bold mono">{v.data?.slice(8,10)}/{v.data?.slice(5,7)}</span>}
                       </button>
                       <div>
-                        <p className="font-semibold text-sm" style={{ color: "#2B2418" }}>{prod?.nome || "Produtor removido"}</p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="font-semibold text-sm" style={{ color: "#2B2418" }}>{nomeExibido}</p>
+                          {!prod && v.nomeAvulso && (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: "#F3ECD8", color: "#8A7C5C" }}>sem cadastro</span>
+                          )}
+                        </div>
                         <p className="text-xs" style={{ color: "#8A7C5C" }}>{fmtDate(v.data)}{v.horario ? ` · ${v.horario}` : ""}</p>
                         {v.observacoes && <p className="text-sm mt-1" style={{ color: "#3D3624" }}>{v.observacoes}</p>}
                         {v.produtos?.length > 0 && (
@@ -788,6 +813,11 @@ function Agenda({ producers, visits, setVisits, products }) {
                               return pr ? <span key={pid} className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "#F3ECD8", color: "#6B5A2E" }}>{pr.nome}</span> : null;
                             })}
                           </div>
+                        )}
+                        {!prod && v.nomeAvulso && (
+                          <button onClick={() => promoteToProducer(v)} className="text-xs font-semibold mt-1.5" style={{ color: "#1F3B2C" }}>
+                            + Cadastrar como produtor
+                          </button>
                         )}
                       </div>
                     </div>
@@ -807,8 +837,10 @@ function Agenda({ producers, visits, setVisits, products }) {
   );
 }
 function VisitForm({ initial, producers, products, onSave, onClose }) {
+  const [modo, setModo] = useState(initial.nomeAvulso ? "avulso" : "cadastrado");
   const [f, setF] = useState({
-    producerId: initial.producerId || producers[0]?.id || "", data: initial.data || new Date().toISOString().slice(0,10),
+    producerId: initial.producerId || producers[0]?.id || "", nomeAvulso: initial.nomeAvulso || "",
+    data: initial.data || new Date().toISOString().slice(0,10),
     horario: initial.horario || "", observacoes: initial.observacoes || "", status: initial.status || "Agendada",
     produtos: initial.produtos || [], id: initial.id,
   });
@@ -816,13 +848,38 @@ function VisitForm({ initial, producers, products, onSave, onClose }) {
   function toggleProd(id) {
     setF({ ...f, produtos: f.produtos.includes(id) ? f.produtos.filter(x => x !== id) : [...f.produtos, id] });
   }
+  function handleSave() {
+    if (modo === "cadastrado") {
+      if (!f.producerId) return;
+      onSave({ ...f, nomeAvulso: "" });
+    } else {
+      if (!f.nomeAvulso.trim()) return;
+      onSave({ ...f, producerId: "" });
+    }
+  }
   return (
     <Sheet title={initial.id ? "Editar visita" : "Nova visita"} onClose={onClose}>
-      <Field label="Produtor">
-        <select className={inputCls} style={inputStyle} value={f.producerId} onChange={up("producerId")}>
-          {producers.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
-        </select>
-      </Field>
+      {producers.length > 0 && (
+        <div className="flex rounded-xl p-1 mb-3" style={{ background: "#EFE7D2" }}>
+          <button type="button" onClick={() => setModo("cadastrado")} className="flex-1 py-1.5 rounded-lg text-sm font-semibold" style={modo === "cadastrado" ? { background: "#1F3B2C", color: "white" } : { color: "#6B5A2E" }}>
+            Produtor cadastrado
+          </button>
+          <button type="button" onClick={() => setModo("avulso")} className="flex-1 py-1.5 rounded-lg text-sm font-semibold" style={modo === "avulso" ? { background: "#1F3B2C", color: "white" } : { color: "#6B5A2E" }}>
+            Sem cadastro
+          </button>
+        </div>
+      )}
+      {modo === "cadastrado" && producers.length > 0 ? (
+        <Field label="Produtor">
+          <select className={inputCls} style={inputStyle} value={f.producerId} onChange={up("producerId")}>
+            {producers.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+          </select>
+        </Field>
+      ) : (
+        <Field label="Nome do contato">
+          <input className={inputCls} style={inputStyle} value={f.nomeAvulso} onChange={up("nomeAvulso")} placeholder="Nome da pessoa visitada" />
+        </Field>
+      )}
       <div className="grid grid-cols-2 gap-2">
         <Field label="Data"><input type="date" className={inputCls} style={inputStyle} value={f.data} onChange={up("data")} /></Field>
         <Field label="Horário"><input type="time" className={inputCls} style={inputStyle} value={f.horario} onChange={up("horario")} /></Field>
@@ -846,20 +903,21 @@ function VisitForm({ initial, producers, products, onSave, onClose }) {
           <option>Agendada</option><option>Realizada</option><option>Cancelada</option>
         </select>
       </Field>
-      <button onClick={() => f.producerId && onSave(f)} className="w-full py-3 rounded-xl font-semibold text-white mt-2" style={{ background: "#1F3B2C" }}>
+      <button onClick={handleSave} className="w-full py-3 rounded-xl font-semibold text-white mt-2" style={{ background: "#1F3B2C" }}>
         Salvar visita
       </button>
     </Sheet>
   );
 }
 
+// ---------- PRODUTOS ----------
 function Produtos({ products, setProducts }) {
   const [editing, setEditing] = useState(null);
   const [selected, setSelected] = useState(null);
   const [calcOpen, setCalcOpen] = useState(false);
-  const [view, setView] = useState("lista");
+  const [view, setView] = useState("lista"); // lista | culturas | anotacoes
   const [activeCrop, setActiveCrop] = useState(CROPS[0]);
-  const [cropEditing, setCropEditing] = useState(null);
+  const [cropEditing, setCropEditing] = useState(null); // { productId, entry }
   const [noteProductId, setNoteProductId] = useState(null);
   const [noteText, setNoteText] = useState("");
 
@@ -1232,6 +1290,7 @@ function ProductForm({ initial, onSave, onClose }) {
   );
 }
 
+// ---------- VENDAS ----------
 function Vendas({ sales, setSales, producers, products }) {
   const [editing, setEditing] = useState(null);
   function upsert(data) {
@@ -1290,7 +1349,7 @@ function SaleForm({ initial, producers, products, onSave, onClose }) {
   useEffect(() => {
     const prod = products.find(p => p.id === f.productId);
     if (prod && !initial.id) setF(prev => ({ ...prev, valorTotal: (Number(prod.precoVenda) * Number(f.quantidade || 0)).toFixed(2) }));
-  }, [f.productId, f.quantidade]);
+  }, [f.productId, f.quantidade]); // eslint-disable-line
   const up = (k) => (e) => setF({ ...f, [k]: e.target.value });
   return (
     <Sheet title={initial.id ? "Editar venda" : "Nova venda"} onClose={onClose}>
@@ -1316,6 +1375,7 @@ function SaleForm({ initial, producers, products, onSave, onClose }) {
   );
 }
 
+// ---------- CALCULADORA DE MARGEM ----------
 function MarginCalculator({ products, initialProductId, onClose }) {
   const [productId, setProductId] = useState(initialProductId || "");
   const [custo, setCusto] = useState("");
@@ -1328,7 +1388,7 @@ function MarginCalculator({ products, initialProductId, onClose }) {
       const p = products.find(x => x.id === initialProductId);
       if (p) { setCusto(p.custo || ""); setPreco(p.precoVenda || ""); }
     }
-  }, []);
+  }, []); // eslint-disable-line
 
   function applyProduct(id) {
     setProductId(id);
@@ -1342,10 +1402,12 @@ function MarginCalculator({ products, initialProductId, onClose }) {
   const lucroUnit = (Number(preco) || 0) - (Number(custo) || 0);
   const markup = Number(custo) ? (lucroUnit / Number(custo)) * 100 : null;
 
+  // reverse: given cost + target margin, required sale price
   const precoNecessario = (custo && margemAlvo && Number(margemAlvo) < 100)
     ? Number(custo) / (1 - Number(margemAlvo) / 100)
     : null;
 
+  // discount: given sale price + discount %, final price and resulting margin
   const precoFinal = (preco && desconto)
     ? Number(preco) * (1 - Number(desconto) / 100)
     : null;
