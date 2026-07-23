@@ -837,7 +837,7 @@ function Agenda({ producers, visits, setVisits, products, setProducers }) {
   );
 }
 function VisitForm({ initial, producers, products, onSave, onClose }) {
-  const [modo, setModo] = useState(initial.nomeAvulso ? "avulso" : "cadastrado");
+  const [modo, setModo] = useState(initial.nomeAvulso ? "avulso" : (producers.length > 0 ? "cadastrado" : "avulso"));
   const [f, setF] = useState({
     producerId: initial.producerId || producers[0]?.id || "", nomeAvulso: initial.nomeAvulso || "",
     data: initial.data || new Date().toISOString().slice(0,10),
@@ -849,7 +849,8 @@ function VisitForm({ initial, producers, products, onSave, onClose }) {
     setF({ ...f, produtos: f.produtos.includes(id) ? f.produtos.filter(x => x !== id) : [...f.produtos, id] });
   }
   function handleSave() {
-    if (modo === "cadastrado") {
+    const usandoCadastrado = modo === "cadastrado" && producers.length > 0;
+    if (usandoCadastrado) {
       if (!f.producerId) return;
       onSave({ ...f, nomeAvulso: "" });
     } else {
