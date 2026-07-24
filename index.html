@@ -122,6 +122,7 @@ const FileText = EmojiIcon("📄");
 const Loader2 = EmojiIcon("⏳");
 const Calculator = EmojiIcon("🧮");
 const RefreshCw = EmojiIcon("🔄");
+const Camera = EmojiIcon("📷");
 
 // ---------- helpers ----------
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -163,6 +164,28 @@ const WCODE = {
   95: { d: "Tempestade", i: CloudRain }, 71: { d: "Neve", i: CloudSnow },
 };
 const wInfo = (code) => WCODE[code] || { d: "—", i: Cloud };
+
+function resizeImage(file, maxWidth = 900, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 async function reverseGeocode(lat, lon) {
   try {
@@ -385,7 +408,7 @@ function Header({ title, sub, right }) {
 }
 
 // ---------- INÍCIO / DASHBOARD ----------
-function Inicio({ producers, visits, products, sales, goTab }) {
+function Inicio({ producers, visits, products, sales, goTab, setProducers, setVisits, setProducts, setSales }) {
   const [weather, setWeather] = useState(null);
   const [wLoading, setWLoading] = useState(false);
   const [city, setCity] = useState("");
@@ -441,6 +464,39 @@ function Inicio({ producers, visits, products, sales, goTab }) {
       { timeout: 8000 }
     );
   }, []); // eslint-disable-line
+
+  function exportarBackup() {
+    const data = { producers, visits, products, sales, exportadoEm: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `crm-rtv-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function importarBackup(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (data.producers) setProducers(data.producers);
+        if (data.visits) setVisits(data.visits);
+        if (data.products) setProducts(data.products);
+        if (data.sales) setSales(data.sales);
+        alert("Backup importado com sucesso!");
+      } catch {
+        alert("Não consegui ler esse arquivo. Confirme que é um backup exportado daqui do app.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
 
   return (
     <div>
@@ -542,6 +598,20 @@ function Inicio({ producers, visits, products, sales, goTab }) {
               })}
             </div>
           )}
+        </div>
+
+        <div className="rounded-2xl p-4 border" style={{ borderColor: "#E4DAC0" }}>
+          <p className="text-[11px] uppercase tracking-widest font-semibold mb-1" style={{ color: "#8A7C5C" }}>Backup dos dados</p>
+          <p className="text-xs mb-3" style={{ color: "#8A7C5C" }}>Salve um arquivo com tudo (produtores, visitas, produtos, vendas) de vez em quando, pra nunca perder nada.</p>
+          <div className="flex gap-2">
+            <button onClick={exportarBackup} className="flex-1 py-2.5 rounded-lg text-sm font-semibold" style={{ background: "#1F3B2C", color: "white" }}>
+              Exportar backup
+            </button>
+            <label className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-center" style={{ background: "#EFE7D2", color: "#1F3B2C" }}>
+              Importar backup
+              <input type="file" accept="application/json" onChange={importarBackup} className="hidden" />
+            </label>
+          </div>
         </div>
       </div>
     </div>
@@ -774,12 +844,51 @@ function Agenda({ producers, visits, setVisits, products, setProducers }) {
     setVisits(visits.map(x => x.id === v.id ? { ...x, producerId: novo.id, nomeAvulso: "" } : x));
   }
 
+  function exportarRelatorio() {
+    const linhas = sorted.map(v => {
+      const prod = producers.find(p => p.id === v.producerId);
+      const nome = prod?.nome || v.nomeAvulso || "Sem nome";
+      const produtosNomes = (v.produtos || []).map(pid => products.find(p => p.id === pid)?.nome).filter(Boolean).join(", ");
+      const fotosHtml = (v.fotos || []).map(foto => `<img src="${foto}" style="width:160px;height:160px;object-fit:cover;border-radius:8px;margin:4px;" />`).join("");
+      return `
+        <div style="margin-bottom:20px;padding:16px;border:1px solid #ddd;border-radius:10px;">
+          <h3 style="margin:0 0 4px;color:#1F3B2C;">${nome}</h3>
+          <p style="color:#888;margin:0 0 8px;font-size:14px;">${fmtDate(v.data)}${v.horario ? " · " + v.horario : ""} — ${v.status}</p>
+          ${v.observacoes ? `<p style="margin:0 0 8px;">${v.observacoes}</p>` : ""}
+          ${produtosNomes ? `<p style="margin:0 0 8px;font-size:14px;"><b>Produtos:</b> ${produtosNomes}</p>` : ""}
+          ${fotosHtml ? `<div style="display:flex;flex-wrap:wrap;">${fotosHtml}</div>` : ""}
+        </div>`;
+    }).join("");
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Relatório de Visitas</title></head>
+      <body style="font-family: -apple-system, sans-serif; max-width:700px; margin:32px auto; padding:0 16px; color:#2B2418;">
+        <h1 style="color:#1F3B2C;">Relatório de Visitas</h1>
+        <p style="color:#888;">Gerado em ${new Date().toLocaleDateString("pt-BR")} — ${sorted.length} visita(s)</p>
+        ${linhas}
+      </body></html>`;
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `relatorio-visitas-${new Date().toISOString().slice(0, 10)}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   const sorted = [...visits].sort((a, b) => a.data.localeCompare(b.data));
 
   return (
     <div>
       <Header sub={`${visits.length} registradas`} title="Agenda de visitas" right={
-        <button onClick={() => setEditing({})} className="p-2 rounded-full" style={{ background: "#4C7A3D" }}><Plus size={18} color="white" /></button>
+        <div className="flex gap-2">
+          {visits.length > 0 && (
+            <button onClick={exportarRelatorio} className="p-2 rounded-full" style={{ background: "#31563E" }} title="Exportar relatório">
+              <FileText size={18} color="white" />
+            </button>
+          )}
+          <button onClick={() => setEditing({})} className="p-2 rounded-full" style={{ background: "#4C7A3D" }}><Plus size={18} color="white" /></button>
+        </div>
       } />
       <div className="px-5 pt-4">
         {sorted.length === 0 ? (
@@ -814,6 +923,18 @@ function Agenda({ producers, visits, setVisits, products, setProducers }) {
                             })}
                           </div>
                         )}
+                        {v.fotos?.length > 0 && (
+                          <div className="flex gap-1.5 mt-1.5">
+                            {v.fotos.slice(0, 4).map((foto, i) => (
+                              <img key={i} src={foto} className="w-10 h-10 rounded-lg object-cover" style={{ border: "1px solid #E4DAC0" }} />
+                            ))}
+                            {v.fotos.length > 4 && (
+                              <div className="w-10 h-10 rounded-lg flex items-center justify-center text-[10px] font-bold" style={{ background: "#F3ECD8", color: "#6B5A2E" }}>
+                                +{v.fotos.length - 4}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {!prod && v.nomeAvulso && (
                           <button onClick={() => promoteToProducer(v)} className="text-xs font-semibold mt-1.5" style={{ color: "#1F3B2C" }}>
                             + Cadastrar como produtor
@@ -844,18 +965,34 @@ function VisitForm({ initial, producers, products, onSave, onClose }) {
     horario: initial.horario || "", observacoes: initial.observacoes || "", status: initial.status || "Agendada",
     produtos: initial.produtos || [], id: initial.id,
   });
+  const [fotos, setFotos] = useState(initial.fotos || []);
+  const [enviandoFoto, setEnviandoFoto] = useState(false);
   const up = (k) => (e) => setF({ ...f, [k]: e.target.value });
   function toggleProd(id) {
     setF({ ...f, produtos: f.produtos.includes(id) ? f.produtos.filter(x => x !== id) : [...f.produtos, id] });
+  }
+  async function handleFotos(e) {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setEnviandoFoto(true);
+    try {
+      const novas = await Promise.all(files.map(file => resizeImage(file)));
+      setFotos(prev => [...prev, ...novas]);
+    } catch {}
+    setEnviandoFoto(false);
+    e.target.value = "";
+  }
+  function removeFoto(idx) {
+    setFotos(prev => prev.filter((_, i) => i !== idx));
   }
   function handleSave() {
     const usandoCadastrado = modo === "cadastrado" && producers.length > 0;
     if (usandoCadastrado) {
       if (!f.producerId) return;
-      onSave({ ...f, nomeAvulso: "" });
+      onSave({ ...f, nomeAvulso: "", fotos });
     } else {
       if (!f.nomeAvulso.trim()) return;
-      onSave({ ...f, producerId: "" });
+      onSave({ ...f, producerId: "", fotos });
     }
   }
   return (
@@ -886,6 +1023,24 @@ function VisitForm({ initial, producers, products, onSave, onClose }) {
         <Field label="Horário"><input type="time" className={inputCls} style={inputStyle} value={f.horario} onChange={up("horario")} /></Field>
       </div>
       <Field label="Observações"><textarea className={inputCls} style={inputStyle} rows={3} value={f.observacoes} onChange={up("observacoes")} placeholder="O que foi conversado / visitado" /></Field>
+      <Field label="Fotos">
+        {fotos.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {fotos.map((foto, i) => (
+              <div key={i} className="relative">
+                <img src={foto} className="w-16 h-16 rounded-lg object-cover" style={{ border: "1px solid #D9CFB2" }} />
+                <button type="button" onClick={() => removeFoto(i)} className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "#A5382A" }}>
+                  <X size={11} color="white" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <label className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg" style={{ background: "#EFE7D2", color: "#1F3B2C" }}>
+          <Camera size={14} /> {enviandoFoto ? "Processando..." : "Adicionar foto"}
+          <input type="file" accept="image/*" capture="environment" multiple onChange={handleFotos} className="hidden" disabled={enviandoFoto} />
+        </label>
+      </Field>
       {products.length > 0 && (
         <Field label="Produtos apresentados">
           <div className="flex flex-wrap gap-1.5">
