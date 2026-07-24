@@ -360,6 +360,7 @@ function App() {
     { id: "agenda", label: "Agenda", icon: Calendar },
     { id: "produtos", label: "Produtos", icon: Package },
     { id: "vendas", label: "Vendas", icon: DollarSign },
+    { id: "dashboard", label: "Dashboard", icon: TrendingUp },
   ];
 
   return (
@@ -375,6 +376,7 @@ function App() {
               {tab === "agenda" && <Agenda {...ctx} />}
               {tab === "produtos" && <Produtos {...ctx} />}
               {tab === "vendas" && <Vendas {...ctx} />}
+              {tab === "dashboard" && <Dashboard {...ctx} />}
             </div>
             <nav className="flex border-t" style={{ borderColor: "#E4DAC0", background: "#FBF7EC", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
               {NAV.map((n) => {
@@ -1687,6 +1689,140 @@ function MarginCalculator({ products, initialProductId, onClose }) {
         Limpar campos
       </button>
     </Sheet>
+  );
+}
+
+// ---------- GRÁFICO DE BARRAS (simples, sem dependências externas) ----------
+function BarChart({ data, valueFormat, colorFor, height = 150, light }) {
+  const max = Math.max(1, ...data.map(d => d.value));
+  const labelColor = light ? "#C9DBBF" : "#8A7C5C";
+  const valueColor = light ? "#EAF2E4" : "#3D3624";
+  return (
+    <div className="flex items-end gap-2" style={{ height }}>
+      {data.map((d, i) => {
+        const h = Math.max(2, (d.value / max) * (height - 30));
+        return (
+          <div key={i} className="flex-1 flex flex-col items-center justify-end h-full min-w-0">
+            <span className="text-[9px] font-bold mono mb-1 truncate w-full text-center" style={{ color: valueColor }}>
+              {valueFormat ? valueFormat(d.value) : d.value}
+            </span>
+            <div className="w-full rounded-t-md" style={{ height: h, background: colorFor ? colorFor(d) : "#4C7A3D", minHeight: 2 }} />
+            <span className="text-[9px] mt-1 truncate w-full text-center capitalize" style={{ color: labelColor }}>{d.label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------- DASHBOARD ----------
+function Dashboard({ sales, products, visits }) {
+  const [chuvaCidade, setChuvaCidade] = useState("");
+  const [chuvaDados, setChuvaDados] = useState(null);
+  const [chuvaLoading, setChuvaLoading] = useState(false);
+
+  const meses6 = [...Array(6)].map((_, i) => {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() - (5 - i));
+    return d;
+  });
+
+  const vendasPorMes = meses6.map(d => {
+    const key = d.toISOString().slice(0, 7);
+    const total = sales.filter(s => s.data?.slice(0, 7) === key).reduce((acc, s) => acc + Number(s.valorTotal || 0), 0);
+    return { label: d.toLocaleDateString("pt-BR", { month: "short" }), value: total };
+  });
+
+  const visitasPorMes = meses6.map(d => {
+    const key = d.toISOString().slice(0, 7);
+    const count = visits.filter(v => v.data?.slice(0, 7) === key).length;
+    return { label: d.toLocaleDateString("pt-BR", { month: "short" }), value: count };
+  });
+
+  const margemPorProduto = products.map(p => {
+    const m = margemInfo(p.custo, p.precoVenda);
+    return { label: p.nome, value: m.pct !== null ? Math.max(0, m.pct) : 0, tone: m.tone };
+  });
+
+  async function buscarChuva(cidade) {
+    if (!cidade) return;
+    setChuvaLoading(true);
+    try {
+      const geo = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cidade)}&count=1&language=pt&format=json`).then(r => r.json());
+      const loc = geo?.results?.[0];
+      if (!loc) { setChuvaDados(null); setChuvaLoading(false); return; }
+      const ano = new Date().getFullYear();
+      const hoje = new Date().toISOString().slice(0, 10);
+      const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${loc.latitude}&longitude=${loc.longitude}&start_date=${ano}-01-01&end_date=${hoje}&daily=precipitation_sum&timezone=auto`;
+      const data = await fetch(url).then(r => r.json());
+      const porMes = {};
+      (data.daily?.time || []).forEach((t, i) => {
+        const mes = t.slice(0, 7);
+        porMes[mes] = (porMes[mes] || 0) + (data.daily.precipitation_sum[i] || 0);
+      });
+      const arr = Object.entries(porMes).sort().map(([mes, total]) => ({
+        label: new Date(mes + "-01T00:00:00").toLocaleDateString("pt-BR", { month: "short" }),
+        value: Math.round(total),
+      }));
+      setChuvaDados({ place: `${loc.name}${loc.admin1 ? ", " + loc.admin1 : ""}`, data: arr });
+    } catch { setChuvaDados(null); }
+    setChuvaLoading(false);
+  }
+
+  return (
+    <div>
+      <Header sub="Análises" title="Dashboard" />
+      <div className="px-5 pt-4 space-y-4 pb-4">
+        <div className="rounded-2xl p-4 border" style={{ borderColor: "#E4DAC0" }}>
+          <p className="text-[11px] uppercase tracking-widest font-semibold mb-3" style={{ color: "#8A7C5C" }}>Vendas por mês</p>
+          {sales.length === 0 ? (
+            <p className="text-sm" style={{ color: "#8A7C5C" }}>Sem vendas registradas ainda.</p>
+          ) : (
+            <BarChart data={vendasPorMes} valueFormat={v => Math.round(v).toLocaleString("pt-BR")} colorFor={() => "#4C7A3D"} />
+          )}
+        </div>
+
+        <div className="rounded-2xl p-4 border" style={{ borderColor: "#E4DAC0" }}>
+          <p className="text-[11px] uppercase tracking-widest font-semibold mb-3" style={{ color: "#8A7C5C" }}>Visitas por mês</p>
+          {visits.length === 0 ? (
+            <p className="text-sm" style={{ color: "#8A7C5C" }}>Sem visitas registradas ainda.</p>
+          ) : (
+            <BarChart data={visitasPorMes} colorFor={() => "#1F3B2C"} />
+          )}
+        </div>
+
+        <div className="rounded-2xl p-4 border" style={{ borderColor: "#E4DAC0" }}>
+          <p className="text-[11px] uppercase tracking-widest font-semibold mb-3" style={{ color: "#8A7C5C" }}>Margem por produto</p>
+          {products.length === 0 ? (
+            <p className="text-sm" style={{ color: "#8A7C5C" }}>Sem produtos cadastrados ainda.</p>
+          ) : (
+            <BarChart data={margemPorProduto} valueFormat={v => `${v.toFixed(0)}%`} colorFor={d => TONE[d.tone]?.color || "#4C7A3D"} />
+          )}
+        </div>
+
+        <div className="rounded-2xl p-4" style={{ background: "#274A34" }}>
+          <p className="text-[11px] uppercase tracking-widest font-semibold mb-2" style={{ color: "#9FBB8E" }}>Chuva acumulada por mês</p>
+          <div className="flex gap-1.5 mb-3">
+            <input value={chuvaCidade} onChange={e => setChuvaCidade(e.target.value)} placeholder="Cidade"
+              className="flex-1 rounded-lg px-2.5 py-1.5 text-sm outline-none" style={{ background: "#3A5D45", color: "#EAF2E4" }} />
+            <button onClick={() => buscarChuva(chuvaCidade)} className="px-3 rounded-lg" style={{ background: "#4C7A3D" }}>
+              <Search size={15} color="white" />
+            </button>
+          </div>
+          {chuvaLoading && <p className="text-sm text-white/70">Buscando...</p>}
+          {!chuvaLoading && chuvaDados && (
+            <>
+              <p className="text-xs mb-2" style={{ color: "#C9DBBF" }}>{chuvaDados.place} · mm acumulados por mês em {new Date().getFullYear()}</p>
+              <BarChart data={chuvaDados.data} valueFormat={v => `${v}mm`} colorFor={() => "#5B8FD6"} light />
+            </>
+          )}
+          {!chuvaLoading && !chuvaDados && (
+            <p className="text-sm" style={{ color: "#C9DBBF" }}>Digite uma cidade para ver o acumulado de chuva do ano.</p>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
