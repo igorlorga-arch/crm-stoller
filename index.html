@@ -1499,14 +1499,25 @@ function SaleForm({ initial, producers, products, onSave, onClose }) {
     producerId: initial.producerId || producers[0]?.id || "",
     productId: initial.productId || products[0]?.id || "",
     quantidade: initial.quantidade || 1,
+    precoUnitario: initial.precoUnitario ?? (products.find(p => p.id === (initial.productId || products[0]?.id))?.precoVenda || ""),
     data: initial.data || new Date().toISOString().slice(0,10),
-    valorTotal: initial.valorTotal || "", id: initial.id,
+    id: initial.id,
   });
-  useEffect(() => {
-    const prod = products.find(p => p.id === f.productId);
-    if (prod && !initial.id) setF(prev => ({ ...prev, valorTotal: (Number(prod.precoVenda) * Number(f.quantidade || 0)).toFixed(2) }));
-  }, [f.productId, f.quantidade]); // eslint-disable-line
   const up = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  function selecionarProduto(e) {
+    const id = e.target.value;
+    const prod = products.find(p => p.id === id);
+    setF(prev => ({ ...prev, productId: id, precoUnitario: prod ? (prod.precoVenda || "") : prev.precoUnitario }));
+  }
+
+  const valorTotal = (Number(f.quantidade) || 0) * (Number(f.precoUnitario) || 0);
+
+  function handleSave() {
+    if (!f.producerId || !f.productId) return;
+    onSave({ ...f, valorTotal: valorTotal.toFixed(2) });
+  }
+
   return (
     <Sheet title={initial.id ? "Editar venda" : "Nova venda"} onClose={onClose}>
       <Field label="Produtor">
@@ -1515,16 +1526,20 @@ function SaleForm({ initial, producers, products, onSave, onClose }) {
         </select>
       </Field>
       <Field label="Produto">
-        <select className={inputCls} style={inputStyle} value={f.productId} onChange={up("productId")}>
+        <select className={inputCls} style={inputStyle} value={f.productId} onChange={selecionarProduto}>
           {products.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
         </select>
       </Field>
       <div className="grid grid-cols-2 gap-2">
         <Field label="Quantidade"><input type="number" min="1" className={inputCls + " mono"} style={inputStyle} value={f.quantidade} onChange={up("quantidade")} /></Field>
-        <Field label="Data"><input type="date" className={inputCls} style={inputStyle} value={f.data} onChange={up("data")} /></Field>
+        <Field label="Preço de venda (R$)"><input type="number" step="0.01" className={inputCls + " mono"} style={inputStyle} value={f.precoUnitario} onChange={up("precoUnitario")} placeholder="0,00" /></Field>
       </div>
-      <Field label="Valor total (R$)"><input type="number" step="0.01" className={inputCls + " mono"} style={inputStyle} value={f.valorTotal} onChange={up("valorTotal")} /></Field>
-      <button onClick={() => f.producerId && f.productId && onSave(f)} className="w-full py-3 rounded-xl font-semibold text-white mt-2" style={{ background: "#1F3B2C" }}>
+      <Field label="Data"><input type="date" className={inputCls} style={inputStyle} value={f.data} onChange={up("data")} /></Field>
+      <div className="rounded-lg px-3 py-2.5 mb-3 flex items-center justify-between" style={{ background: "#F3ECD8" }}>
+        <span className="text-sm font-semibold" style={{ color: "#6B5A2E" }}>Valor total</span>
+        <span className="text-lg font-bold mono" style={{ color: "#1F3B2C" }}>{fmtBRL(valorTotal)}</span>
+      </div>
+      <button onClick={handleSave} className="w-full py-3 rounded-xl font-semibold text-white mt-2" style={{ background: "#1F3B2C" }}>
         Salvar venda
       </button>
     </Sheet>
