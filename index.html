@@ -1383,6 +1383,7 @@ function MarginCalculator({ products, initialProductId, onClose }) {
   const [preco, setPreco] = useState("");
   const [margemAlvo, setMargemAlvo] = useState("");
   const [desconto, setDesconto] = useState("");
+  const [quantidade, setQuantidade] = useState("");
 
   useEffect(() => {
     if (initialProductId) {
@@ -1414,7 +1415,13 @@ function MarginCalculator({ products, initialProductId, onClose }) {
     : null;
   const margemFinal = precoFinal !== null ? margemInfo(custo, precoFinal) : null;
 
-  function reset() { setCusto(""); setPreco(""); setMargemAlvo(""); setDesconto(""); setProductId(""); }
+  // totals for a batch of units
+  const qtd = Number(quantidade) || 0;
+  const totalCusto = qtd * (Number(custo) || 0);
+  const totalVenda = qtd * (precoFinal !== null ? precoFinal : (Number(preco) || 0));
+  const totalLucro = totalVenda - totalCusto;
+
+  function reset() { setCusto(""); setPreco(""); setMargemAlvo(""); setDesconto(""); setQuantidade(""); setProductId(""); }
 
   return (
     <Sheet title="Calculadora de margem" onClose={onClose}>
@@ -1435,6 +1442,9 @@ function MarginCalculator({ products, initialProductId, onClose }) {
           <input type="number" step="0.01" className={inputCls + " mono"} style={inputStyle} value={preco} onChange={e => setPreco(e.target.value)} placeholder="0,00" />
         </Field>
       </div>
+      <Field label="Quantidade (opcional — calcula o total)">
+        <input type="number" step="1" min="0" className={inputCls + " mono"} style={inputStyle} value={quantidade} onChange={e => setQuantidade(e.target.value)} placeholder="Ex: 20" />
+      </Field>
 
       <div className="rounded-2xl p-4 mb-4" style={{ background: t.bg }}>
         <div className="flex items-center gap-2 mb-1">
@@ -1447,6 +1457,19 @@ function MarginCalculator({ products, initialProductId, onClose }) {
           <span style={{ color: t.color }}>Markup: <b className="mono">{markup !== null ? `${markup.toFixed(1)}%` : "—"}</b></span>
         </div>
       </div>
+
+      {qtd > 0 && (
+        <div className="rounded-xl p-3.5 mb-4" style={{ background: "#F3ECD8" }}>
+          <p className="text-[11px] uppercase tracking-wide font-semibold mb-2" style={{ color: "#8A7C5C" }}>
+            Total para {qtd} {qtd === 1 ? "unidade" : "unidades"}{precoFinal !== null ? " (com desconto)" : ""}
+          </p>
+          <div className="space-y-1.5 text-sm">
+            <div className="flex justify-between"><span style={{ color: "#6B5A2E" }}>Custo total</span><span className="font-bold mono" style={{ color: "#3D3624" }}>{fmtBRL(totalCusto)}</span></div>
+            <div className="flex justify-between"><span style={{ color: "#6B5A2E" }}>Venda total</span><span className="font-bold mono" style={{ color: "#3D3624" }}>{fmtBRL(totalVenda)}</span></div>
+            <div className="flex justify-between pt-1.5 border-t" style={{ borderColor: "#D9CFB2" }}><span style={{ color: "#6B5A2E" }}>Lucro total</span><span className="font-bold mono" style={{ color: "#1F3B2C" }}>{fmtBRL(totalLucro)}</span></div>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-xl border p-3.5 mb-2" style={{ borderColor: "#E4DAC0" }}>
         <div className="flex items-center gap-2 mb-2">
