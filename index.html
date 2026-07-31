@@ -17,7 +17,7 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone@7.26.2/babel.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.26.2/babel.min.js" crossorigin></script>
 </head>
 <body>
 <div id="root"></div>
@@ -31,6 +31,15 @@ window.addEventListener('error', function (e) {
   var stack = (e.error && e.error.stack) ? e.error.stack : '';
   el.innerHTML = '<div style="padding:20px;font-family:monospace;font-size:13px;white-space:pre-wrap;color:#7a1f1f;background:#fbe4e0;min-height:100vh;">'
     + '⚠️ ERRO AO CARREGAR O APP\n\n' + msg + '\n\n' + loc + '\n\n' + stack + '</div>';
+});
+window.addEventListener('unhandledrejection', function (e) {
+  var el = document.getElementById('root');
+  if (!el) return;
+  var reason = e.reason;
+  var msg = (reason && reason.message) ? reason.message : String(reason);
+  var stack = (reason && reason.stack) ? reason.stack : '';
+  el.innerHTML = '<div style="padding:20px;font-family:monospace;font-size:13px;white-space:pre-wrap;color:#7a1f1f;background:#fbe4e0;min-height:100vh;">'
+    + '⚠️ ERRO ASSÍNCRONO NO APP\n\n' + msg + '\n\n' + stack + '</div>';
 });
 </script>
 
@@ -1763,6 +1772,41 @@ function MarginCalculator({ products, initialProductId, onClose }) {
           </div>
         ) : (
           <p className="text-xs" style={{ color: "#8A7C5C" }}>Informe o preço de venda e o desconto para ver o preço final.</p>
+        )}
+      </div>
+
+      <div className="rounded-xl border p-3.5 mb-2" style={{ borderColor: "#E4DAC0" }}>
+        <div className="flex items-center gap-2 mb-2">
+          <Calendar size={14} color="#8A7C5C" />
+          <span className="text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A7C5C" }}>Venda financiada (a prazo)</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Juros (% ao mês)">
+            <input type="number" step="0.1" className={inputCls + " mono"} style={inputStyle} value={taxaMensal} onChange={e => setTaxaMensal(e.target.value)} placeholder="Ex: 2,5" />
+          </Field>
+          <Field label="Prazo (meses)">
+            <input type="number" step="1" min="1" className={inputCls + " mono"} style={inputStyle} value={prazoMeses} onChange={e => setPrazoMeses(e.target.value)} placeholder="Ex: 3" />
+          </Field>
+        </div>
+        {precoFinanciado !== null ? (
+          <div className="space-y-2">
+            <div className="rounded-lg px-3 py-2 flex items-center justify-between" style={{ background: "#F3ECD8" }}>
+              <span className="text-xs font-semibold" style={{ color: "#6B5A2E" }}>Preço a prazo</span>
+              <span className="font-bold mono" style={{ color: "#1F3B2C" }}>{fmtBRL(precoFinanciado)}</span>
+            </div>
+            {parcelaMensal !== null && (
+              <div className="rounded-lg px-3 py-2 flex items-center justify-between" style={{ background: "#F3ECD8" }}>
+                <span className="text-xs font-semibold" style={{ color: "#6B5A2E" }}>Valor por mês ({prazoMeses}x)</span>
+                <span className="font-bold mono" style={{ color: "#1F3B2C" }}>{fmtBRL(parcelaMensal)}</span>
+              </div>
+            )}
+            <div className="rounded-lg px-3 py-2 flex items-center justify-between" style={{ background: TONE[margemFinanciado.tone].bg }}>
+              <span className="text-xs font-semibold" style={{ color: TONE[margemFinanciado.tone].color }}>Margem na venda a prazo ({TONE[margemFinanciado.tone].text})</span>
+              <span className="font-bold mono" style={{ color: TONE[margemFinanciado.tone].color }}>{margemFinanciado.pct !== null ? `${margemFinanciado.pct.toFixed(1)}%` : "—"}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs" style={{ color: "#8A7C5C" }}>Informe o preço de venda, a taxa mensal e o prazo para calcular o preço financiado.</p>
         )}
       </div>
 
