@@ -343,6 +343,13 @@ function App() {
   const [visits, setVisits] = useState([]);
   const [products, setProducts] = useState([]);
   const [sales, setSales] = useState([]);
+  const [cotacoes, setCotacoes] = useState({
+    soja: { preco: "", unidade: "R$/saca 60kg", atualizadoEm: "" },
+    milho: { preco: "", unidade: "R$/saca 60kg", atualizadoEm: "" },
+    trigo: { preco: "", unidade: "R$/saca 60kg", atualizadoEm: "" },
+    laranja: { preco: "", unidade: "R$/caixa 40,8kg", atualizadoEm: "" },
+    mandioca: { preco: "", unidade: "R$/tonelada", atualizadoEm: "" },
+  });
   const [saveError, setSaveError] = useState(false);
 
   useEffect(() => {
@@ -359,6 +366,7 @@ function App() {
         };
       });
       setProducers(d.producers); setVisits(d.visits); setProducts(migratedProducts); setSales(d.sales);
+      if (d.cotacoes && Object.keys(d.cotacoes).length) setCotacoes(prev => ({ ...prev, ...d.cotacoes }));
       setReady(true);
     });
   }, []);
@@ -366,8 +374,9 @@ function App() {
   useEffect(() => { if (ready) save("visits", visits).then(ok => setSaveError(!ok)); }, [visits, ready]);
   useEffect(() => { if (ready) save("products", products).then(ok => setSaveError(!ok)); }, [products, ready]);
   useEffect(() => { if (ready) save("sales", sales).then(ok => setSaveError(!ok)); }, [sales, ready]);
+  useEffect(() => { if (ready) save("cotacoes", cotacoes).then(ok => setSaveError(!ok)); }, [cotacoes, ready]);
 
-  const ctx = { producers, setProducers, visits, setVisits, products, setProducts, sales, setSales };
+  const ctx = { producers, setProducers, visits, setVisits, products, setProducts, sales, setSales, cotacoes, setCotacoes };
 
   const NAV = [
     { id: "inicio", label: "Início", icon: Sprout },
