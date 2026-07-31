@@ -47,11 +47,11 @@ window.storage = {
     });
   },
   set: function (key, value) {
-    return new Promise(function (resolve) {
+    return new Promise(function (resolve, reject) {
       try {
         localStorage.setItem("crmrtv:" + key, value);
         resolve({ key: key, value: value, shared: false });
-      } catch (e) { resolve(null); }
+      } catch (e) { reject(e); }
     });
   },
   delete: function (key) {
@@ -165,7 +165,7 @@ const WCODE = {
 };
 const wInfo = (code) => WCODE[code] || { d: "—", i: Cloud };
 
-function resizeImage(file, maxWidth = 900, quality = 0.7) {
+function resizeImage(file, maxWidth = 640, quality = 0.55) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -259,7 +259,7 @@ const STOLLER_PRESETS = [
 ];
 
 // ---------- storage ----------
-const KEYS = { producers: "rtv:producers", visits: "rtv:visits", products: "rtv:products", sales: "rtv:sales" };
+const KEYS = { producers: "rtv:producers", visits: "rtv:visits", products: "rtv:products", sales: "rtv:sales", cotacoes: "rtv:cotacoes" };
 async function loadAll() {
   const out = {};
   for (const [k, key] of Object.entries(KEYS)) {
@@ -271,7 +271,12 @@ async function loadAll() {
   return out;
 }
 async function save(key, value) {
-  try { await window.storage.set(KEYS[key], JSON.stringify(value), false); } catch {}
+  try {
+    await window.storage.set(KEYS[key], JSON.stringify(value), false);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ---------- shared UI ----------
@@ -329,6 +334,7 @@ function App() {
   const [visits, setVisits] = useState([]);
   const [products, setProducts] = useState([]);
   const [sales, setSales] = useState([]);
+  const [saveError, setSaveError] = useState(false);
 
   useEffect(() => {
     loadAll().then((d) => {
@@ -347,10 +353,10 @@ function App() {
       setReady(true);
     });
   }, []);
-  useEffect(() => { if (ready) save("producers", producers); }, [producers, ready]);
-  useEffect(() => { if (ready) save("visits", visits); }, [visits, ready]);
-  useEffect(() => { if (ready) save("products", products); }, [products, ready]);
-  useEffect(() => { if (ready) save("sales", sales); }, [sales, ready]);
+  useEffect(() => { if (ready) save("producers", producers).then(ok => setSaveError(!ok)); }, [producers, ready]);
+  useEffect(() => { if (ready) save("visits", visits).then(ok => setSaveError(!ok)); }, [visits, ready]);
+  useEffect(() => { if (ready) save("products", products).then(ok => setSaveError(!ok)); }, [products, ready]);
+  useEffect(() => { if (ready) save("sales", sales).then(ok => setSaveError(!ok)); }, [sales, ready]);
 
   const ctx = { producers, setProducers, visits, setVisits, products, setProducts, sales, setSales };
 
@@ -365,11 +371,21 @@ function App() {
 
   return (
     <div className="w-full min-h-screen flex items-center justify-center" style={{ background: "#E7E0C9" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
+        * { font-family: 'Inter', sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+      `}</style>
       <div className="w-full sm:max-w-[430px] sm:my-6 sm:rounded-[2.2rem] sm:shadow-2xl overflow-hidden relative" style={{ background: "#FBF7EC", height: "100vh", maxHeight: "100vh" }}>
         {!ready ? (
           <div className="h-full flex items-center justify-center"><Loader2 className="animate-spin" color="#1F3B2C" /></div>
         ) : (
           <div className="h-full flex flex-col">
+            {saveError && (
+              <div className="px-4 py-2.5 text-xs font-semibold text-center leading-snug" style={{ background: "#A5382A", color: "white", paddingTop: "calc(env(safe-area-inset-top, 0px) + 10px)" }}>
+                ⚠️ Não foi possível salvar as últimas alterações. Pode ser falta de espaço (fotos ocupam muito). Vá em Início → Exportar backup agora, e depois apague fotos antigas.
+              </div>
+            )}
             <div className="flex-1 overflow-y-auto pb-4">
               {tab === "inicio" && <Inicio {...ctx} goTab={setTab} />}
               {tab === "produtores" && <Produtores {...ctx} />}
@@ -410,11 +426,12 @@ function Header({ title, sub, right }) {
 }
 
 // ---------- INÍCIO / DASHBOARD ----------
-function Inicio({ producers, visits, products, sales, goTab, setProducers, setVisits, setProducts, setSales }) {
+function Inicio({ producers, visits, products, sales, goTab, setProducers, setVisits, setProducts, setSales, cotacoes, setCotacoes }) {
   const [weather, setWeather] = useState(null);
   const [wLoading, setWLoading] = useState(false);
   const [city, setCity] = useState("");
   const [autoTried, setAutoTried] = useState(false);
+  const [editandoCotacoes, setEditandoCotacoes] = useState(false);
 
   const today = new Date().toISOString().slice(0, 10);
   const proximasVisitas = visits
@@ -573,6 +590,27 @@ function Inicio({ producers, visits, products, sales, goTab, setProducers, setVi
           )}
         </div>
 
+        {/* cotações */}
+        <div className="rounded-2xl p-4 border" style={{ borderColor: "#E4DAC0" }}>
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[11px] uppercase tracking-widest font-semibold" style={{ color: "#8A7C5C" }}>Cotações</span>
+            <button onClick={() => setEditandoCotacoes(true)} className="text-xs font-semibold" style={{ color: "#1F3B2C" }}>Editar</button>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {Object.entries(cotacoes).map(([key, c]) => (
+              <div key={key} className="rounded-xl p-2.5" style={{ background: "#F3ECD8" }}>
+                <p className="text-xs font-bold capitalize" style={{ color: "#3D3624" }}>{key}</p>
+                <p className="text-sm font-bold mono" style={{ color: "#1F3B2C" }}>{c.preco ? fmtBRL(c.preco) : "—"}</p>
+                <p className="text-[10px]" style={{ color: "#8A7C5C" }}>{c.unidade}</p>
+                {c.atualizadoEm && <p className="text-[9px] mt-0.5" style={{ color: "#A79B79" }}>atualizado {fmtDate(c.atualizadoEm)}</p>}
+              </div>
+            ))}
+          </div>
+          <a href="https://www.cepea.esalq.usp.br/br/indicador" target="_blank" rel="noreferrer" className="text-xs font-semibold mt-3 inline-block" style={{ color: "#1F3B2C" }}>
+            Ver cotações oficiais (CEPEA/ESALQ) →
+          </a>
+        </div>
+
         {/* próximas visitas */}
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -616,7 +654,41 @@ function Inicio({ producers, visits, products, sales, goTab, setProducers, setVi
           </div>
         </div>
       </div>
+      {editandoCotacoes && <CotacoesForm cotacoes={cotacoes} onSave={(c) => { setCotacoes(c); setEditandoCotacoes(false); }} onClose={() => setEditandoCotacoes(false)} />}
     </div>
+  );
+}
+
+function CotacoesForm({ cotacoes, onSave, onClose }) {
+  const [f, setF] = useState(cotacoes);
+  function updateCampo(key, campo, valor) {
+    setF(prev => ({ ...prev, [key]: { ...prev[key], [campo]: valor } }));
+  }
+  function handleSave() {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const atualizado = {};
+    Object.entries(f).forEach(([key, c]) => {
+      const mudou = c.preco !== cotacoes[key]?.preco;
+      atualizado[key] = { ...c, atualizadoEm: mudou ? hoje : (c.atualizadoEm || hoje) };
+    });
+    onSave(atualizado);
+  }
+  return (
+    <Sheet title="Editar cotações" onClose={onClose}>
+      <p className="text-xs mb-3" style={{ color: "#8A7C5C" }}>Digite os valores que você conferiu (ex: na CEPEA/ESALQ ou na sua cooperativa). O app só guarda o que você informar.</p>
+      {Object.entries(f).map(([key, c]) => (
+        <div key={key} className="mb-3">
+          <span className="block text-[11px] font-semibold tracking-wide uppercase mb-1 capitalize" style={{ color: "#8A7C5C" }}>{key}</span>
+          <div className="flex gap-2">
+            <input type="number" step="0.01" className={inputCls + " mono"} style={inputStyle} value={c.preco} onChange={e => updateCampo(key, "preco", e.target.value)} placeholder="0,00" />
+            <input className={inputCls} style={{ ...inputStyle, maxWidth: 130 }} value={c.unidade} onChange={e => updateCampo(key, "unidade", e.target.value)} placeholder="Unidade" />
+          </div>
+        </div>
+      ))}
+      <button onClick={handleSave} className="w-full py-3 rounded-xl font-semibold text-white mt-2" style={{ background: "#1F3B2C" }}>
+        Salvar cotações
+      </button>
+    </Sheet>
   );
 }
 
@@ -1556,6 +1628,8 @@ function MarginCalculator({ products, initialProductId, onClose }) {
   const [margemAlvo, setMargemAlvo] = useState("");
   const [desconto, setDesconto] = useState("");
   const [quantidade, setQuantidade] = useState("");
+  const [taxaMensal, setTaxaMensal] = useState("");
+  const [prazoMeses, setPrazoMeses] = useState("");
 
   useEffect(() => {
     if (initialProductId) {
@@ -1587,13 +1661,20 @@ function MarginCalculator({ products, initialProductId, onClose }) {
     : null;
   const margemFinal = precoFinal !== null ? margemInfo(custo, precoFinal) : null;
 
+  // financiamento: preço a prazo com juros compostos ao mês
+  const precoFinanciado = (preco && taxaMensal && prazoMeses)
+    ? Number(preco) * Math.pow(1 + Number(taxaMensal) / 100, Number(prazoMeses))
+    : null;
+  const parcelaMensal = (precoFinanciado !== null && Number(prazoMeses) > 0) ? precoFinanciado / Number(prazoMeses) : null;
+  const margemFinanciado = precoFinanciado !== null ? margemInfo(custo, precoFinanciado) : null;
+
   // totals for a batch of units
   const qtd = Number(quantidade) || 0;
   const totalCusto = qtd * (Number(custo) || 0);
   const totalVenda = qtd * (precoFinal !== null ? precoFinal : (Number(preco) || 0));
   const totalLucro = totalVenda - totalCusto;
 
-  function reset() { setCusto(""); setPreco(""); setMargemAlvo(""); setDesconto(""); setQuantidade(""); setProductId(""); }
+  function reset() { setCusto(""); setPreco(""); setMargemAlvo(""); setDesconto(""); setQuantidade(""); setTaxaMensal(""); setPrazoMeses(""); setProductId(""); }
 
   return (
     <Sheet title="Calculadora de margem" onClose={onClose}>
